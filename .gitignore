@@ -1,0 +1,40 @@
+# Environment
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Data (generated at runtime)
+data/audit_log.jsonl
+data/audit_checkpoints.jsonl
+data/test_*.jsonl
+data/test_*_checkpoints.jsonl
+
+# Test results (generated)
+tests/results_*.json
+tests/adversarial_results_*.json
+tests/__pycache__/
+
+# Docker
+*.log
+
+# IDE
+.ox/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Workspace (sandbox files)
+workspace/sandbox_files/
+
+# Models (large files)
+models/*.gguf
