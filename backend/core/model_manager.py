@@ -100,11 +100,36 @@ def query_total_vram_gb() -> Optional[float]:
     return None
 
 
+MOCK_PREFIX = "[MockLLM] "
+
+
 class MockLLM:
     """
     Deterministic mock LLM for testing without model weights.
     Returns hardcoded responses based on the prompt content.
+    
+    All responses are routed through _wrap_response() to ensure the
+    [MockLLM] disclosure prefix is present on every output path.
     """
+
+    def _wrap_response(self, text: str) -> dict:
+        """
+        Wrap text in the standard llama-cpp-python response format,
+        prepending the [MockLLM] disclosure prefix.
+        
+        Every public method that returns a response MUST call this.
+        """
+        return {"choices": [{"text": f"{MOCK_PREFIX}{text}"}]}
+
+    def _wrap_plan(self, plan: list) -> dict:
+        """
+        Return a plan response. Since prepending text to a JSON array
+        would break parsing, we wrap the plan in a dict that includes
+        a 'mock' indicator field. The planner.py parser handles both
+        raw arrays and this wrapped format.
+        """
+        wrapped = json.dumps({"mock": True, "plan": plan})
+        return {"choices": [{"text": wrapped}]}
 
     def create_chat_completion(self, messages: Union[str, List[dict]], **kwargs) -> dict:
         """
@@ -129,20 +154,20 @@ class MockLLM:
 
         lower = text.lower()
 
-        # If asked for a JSON plan, return a hardcoded plan
+        # If asked for a JSON plan, return a hardcoded plan with mock indicator
         if "plan" in lower or "steps" in lower or "decompose" in lower:
-            plan = json.dumps([
+            plan = [
                 {"tool": "file_io", "action": "read", "args": ["test.txt"]},
                 {"tool": "llm", "action": "summarize", "args": []}
-            ])
-            return {"choices": [{"text": plan}]}
+            ]
+            return self._wrap_plan(plan)
 
         # If asked to summarize, return a mock summary
         if "summar" in lower:
-            return {"choices": [{"text": "This is a mock summary of the provided content."}]}
+            return self._wrap_response("This is a mock summary of the provided content.")
 
         # Default response
-        return {"choices": [{"text": f"[MockLLM] Processed: {text[:120]}"}]}
+        return self._wrap_response(f"Processed: {text[:120]}")
 
     def create_completion(self, prompt: str, **kwargs) -> dict:
         """Alias for create_chat_completion with a plain string."""

@@ -145,7 +145,13 @@ class TestMockLLM:
             [{"role": "system", "content": "Decompose into steps"}, {"role": "user", "content": "read test.txt"}]
         )
         text = result["choices"][0]["text"]
-        plan = json.loads(text)
+        parsed = json.loads(text)
+        # MockLLM wraps plans in {"mock": true, "plan": [...]} for disclosure
+        if isinstance(parsed, dict) and "plan" in parsed:
+            assert parsed["mock"] is True, "Plan response should include mock indicator"
+            plan = parsed["plan"]
+        else:
+            plan = parsed
         assert isinstance(plan, list)
         assert len(plan) > 0
         assert "tool" in plan[0]

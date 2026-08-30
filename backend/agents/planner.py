@@ -67,6 +67,13 @@ def generate_plan(prompt: str, model_manager: ModelManager = None) -> List[dict]
 
         plan = json.loads(cleaned)
 
+        # Handle MockLLM wrapped format: {"mock": true, "plan": [...]}
+        if isinstance(plan, dict) and "plan" in plan:
+            is_mock = plan.get("mock", False)
+            plan = plan["plan"]
+            if is_mock:
+                logger.info("Planner received MockLLM response (mock=True)")
+
         if not isinstance(plan, list):
             logger.warning(f"Planner returned non-list: {type(plan)}. Using fallback.")
             return _make_fallback(prompt)
