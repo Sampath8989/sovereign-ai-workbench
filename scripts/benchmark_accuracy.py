@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path
@@ -103,8 +104,22 @@ def run_benchmark() -> dict:
         "pid_precision": pid_precision,
     }
 
-    # Write results to docs/benchmark_results.json
+    # --- Write results with versioning ---
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+
+    # 1) Timestamped archive (never overwritten)
+    archive_path = DOCS_DIR / f"benchmark_results_{timestamp}.json"
+    archive_content = {"timestamp": timestamp, **metrics}
+    archive_path.write_text(json.dumps(archive_content, indent=2), encoding="utf-8")
+    logger.info(f"Benchmark archive written to {archive_path}")
+
+    # 2) Latest symlink/copy (overwritten each run for convenience)
+    latest_path = DOCS_DIR / "benchmark_results_latest.json"
+    latest_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    logger.info(f"Benchmark latest written to {latest_path}")
+
+    # 3) Backward-compatible main file (overwritten, but archive preserves history)
     out_path = DOCS_DIR / "benchmark_results.json"
     out_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     logger.info(f"Benchmark results written to {out_path}")

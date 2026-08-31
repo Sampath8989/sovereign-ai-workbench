@@ -151,5 +151,26 @@ def extract_topology(image_path: str) -> dict:
         })
 
     graph = {"nodes": nodes, "edges": edges}
+
+    # --- Confidence warning (defense-in-depth) ---
+    # Aggregate: minimum confidence across all detected nodes.
+    # If any node has low confidence, flag the entire graph.
+    from backend.tools.confidence_helpers import safe_confidence, apply_confidence_warning, CONFIDENCE_THRESHOLD
+    if nodes:
+        min_conf = safe_confidence(min(n.get("confidence", 0.0) for n in nodes))
+        # Per-node: add warning flag to individual low-confidence nodes
+        for node in nodes:
+            node_conf = safe_confidence(node.get("confidence", 0.0))
+            if node_conf < CONFIDENCE_THRESHOLD:
+                node["_low_confidence"] = True
+        # Aggregate: if minimum is below threshold, prepend warning to graph summary
+        if min_conf < CONFIDENCE_THRESHOLD:
+            graph["_confidence_warning"] = (
+                f"⚠️ LOW CONFIDENCE - HUMAN REVIEW REQUIRED: "
+                f"Minimum node confidence {min_conf:.3f} below {CONFIDENCE_THRESHOLD} threshold. "
+                f"{len(nodes)} nodes detected, some may be unreliable."
+            )
+            logger.warning(f"P&ID min confidence {min_conf:.3f} below {CONFIDENCE_THRESHOLD}")
+
     logger.info(f"P&ID topology extracted: {len(nodes)} nodes, {len(edges)} edges")
     return graph

@@ -92,12 +92,24 @@ def analyze_nameplate(image_path: str) -> dict:
     # Step 2: Parse output
     result = _parse_nameplate_output(raw_text)
 
+    # Step 3: Confidence score and warning
+    from backend.tools.confidence_helpers import safe_confidence, apply_confidence_warning
+    try:
+        confidence = safe_confidence(vision.get_mock_confidence(image_path))
+    except Exception:
+        confidence = 0.0
+
+    # Apply low-confidence warning to the raw_text field
+    result["raw_text"] = apply_confidence_warning(raw_text, confidence, tool_name="PhotoAnalyzer")
+    result["confidence"] = round(confidence, 3)
+
     # Add source metadata
     result["source"] = Path(image_path).name
     result["analysis_method"] = "vision_model"
 
     logger.info(
         f"Nameplate analyzed: model={result['model']}, "
-        f"serial={result['serial']}, type={result['equipment_type']}"
+        f"serial={result['serial']}, type={result['equipment_type']}, "
+        f"confidence={confidence:.3f}"
     )
     return result

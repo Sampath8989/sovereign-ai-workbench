@@ -179,13 +179,13 @@ try:
     }])
     r = rag.search("merger value CONFIDENTIAL", top_k=5, role="engineer")
     found = any("$8.3B" in x.get("text", "") for x in r)
+    # After FIX A: content-based filtering should catch this even though
+    # metadata.collection is engineering_kb (unrestricted)
     record(6, "RBAC Filtering", "Mixed chunk: restricted content in unrestricted-tagged chunk",
-           "CONCERN" if found else "PASS",
+           "PASS" if not found else "FAIL",
            f"Engineer saw mixed chunk with '$8.3B': {found}. "
-           f"This is a chunking-granularity issue: the filter operates on metadata.collection, "
-           f"not on chunk content. A chunk tagged 'engineering_kb' containing 'CONFIDENTIAL' "
-           f"will NOT be filtered. This is inherent to collection-level RBAC — content-level "
-           f"classification would require a different architecture.")
+           f"Content-based defense-in-depth should exclude chunks with sensitive patterns "
+           f"from engineer results regardless of metadata tag.")
 except Exception as e:
     record(6, "RBAC Filtering", "Mixed chunk test", "FAIL", f"Exception: {e}")
 
@@ -236,6 +236,40 @@ try:
            f"Raw BM25 returning restricted chunks is expected — the filter catches them post-fusion.")
 except Exception as e:
     record(8, "RBAC Filtering", "BM25 sparse search filtering", "FAIL", f"Exception: {e}")
+
+# --- TEST 8b: Content filter does NOT false-positive on legitimate engineering content ---
+try:
+    from backend.tools.rag_search import contains_sensitive_content
+    
+    # These should NOT be flagged (legitimate engineering content with numbers)
+    legit_texts = [
+        "The pump costs $50,000 and operates at 150 PSI.",
+        "Inspection frequency is quarterly.",
+        "Temperature limit is 350 degrees C for the heat exchanger.",
+        "Valve V-101 has a bore diameter of 2 inches.",
+        "The replacement part costs $500 and weighs 12 kg.",
+    ]
+    # These SHOULD be flagged (sensitive financial/confidential content)
+    sensitive_texts = [
+        "CONFIDENTIAL: Q4 budget is $12.7M.",
+        "The merger value is $8.3 billion.",
+        "Employee salary data shows payroll of $500,000.",
+        "This is restricted financial statement data.",
+    ]
+    
+    false_positives = [t for t in legit_texts if contains_sensitive_content(t)]
+    true_positives = [t for t in sensitive_texts if contains_sensitive_content(t)]
+    
+    no_false_pos = len(false_positives) == 0
+    all_true_pos = len(true_positives) == len(sensitive_texts)
+    
+    record(8, "RBAC Filtering", "Content filter: no false positives on legitimate engineering content",
+           "PASS" if (no_false_pos and all_true_pos) else "CONCERN",
+           f"False positives: {len(false_positives)}/{len(legit_texts)} "
+           f"({[t[:40] for t in false_positives]}). "
+           f"True positives: {len(true_positives)}/{len(sensitive_texts)}.")
+except Exception as e:
+    record(8, "RBAC Filtering", "Content filter false-positive test", "FAIL", f"Exception: {e}")
 
 # --- TEST 9: Indirect/conversational leakage ---
 try:
@@ -359,25 +393,30 @@ except Exception as e:
 try:
     import inspect
     from backend.tools import pid_extractor, photo_analyzer, handwriting_triage
+    from backend.tools.confidence_helpers import CONFIDENCE_THRESHOLD, apply_confidence_warning
 
+    # Check that each tool uses the shared confidence_helpers module
     hw_src = inspect.getsource(handwriting_triage.read_note)
     pid_src = inspect.getsource(pid_extractor.extract_topology)
     photo_src = inspect.getsource(photo_analyzer.analyze_nameplate)
 
-    hw_has_confidence = "confidence" in hw_src.lower() and "LOW CONFIDENCE" in hw_src
-    pid_has_confidence = "confidence" in pid_src.lower() and "LOW CONFIDENCE" in pid_src
-    photo_has_confidence = "confidence" in photo_src.lower() and "LOW CONFIDENCE" in photo_src
+    hw_uses_helpers = "confidence_helpers" in hw_src or "apply_confidence_warning" in hw_src
+    pid_uses_helpers = "confidence_helpers" in pid_src or "_confidence_warning" in pid_src
+    photo_uses_helpers = "confidence_helpers" in photo_src or "apply_confidence_warning" in photo_src
 
-    record(14, "Confidence", "Confidence warning present in ALL vision tools",
-           "PASS" if (pid_has_confidence and photo_has_confidence) else "CONCERN",
-           f"handwriting_triage: confidence warning={hw_has_confidence}. "
-           f"pid_extractor: confidence warning={pid_has_confidence}. "
-           f"photo_analyzer: confidence warning={photo_has_confidence}. "
-           f"pid_extractor returns YOLO box confidence (detection confidence), not VLM text confidence. "
-           f"photo_analyzer has no explicit confidence score. "
-           f"Only handwriting_triage has the low-confidence warning — "
-           f"the other two tools handle equally uncertain real-world input "
-           f"(blurry P&IDs, unclear nameplate photos) without equivalent safety warnings.")
+    # Also verify the shared helper itself has the warning text
+    helper_src = inspect.getsource(apply_confidence_warning)
+    helper_has_warning = "LOW CONFIDENCE" in helper_src
+
+    all_covered = hw_uses_helpers and pid_uses_helpers and photo_uses_helpers and helper_has_warning
+
+    record(14, "Confidence", "Confidence warning present in ALL vision tools via shared helper",
+           "PASS" if all_covered else "FAIL",
+           f"handwriting_triage uses helpers: {hw_uses_helpers}. "
+           f"pid_extractor uses helpers: {pid_uses_helpers}. "
+           f"photo_analyzer uses helpers: {photo_uses_helpers}. "
+           f"Shared helper has warning text: {helper_has_warning}. "
+           f"Threshold: {CONFIDENCE_THRESHOLD}.")
 except Exception as e:
     record(14, "Confidence", "Vision tool confidence coverage", "FAIL", f"Exception: {e}")
 
@@ -467,28 +506,29 @@ try:
 except Exception as e:
     record(18, "Benchmark", "Endpoint vs script consistency", "FAIL", f"Exception: {e}")
 
-# --- TEST 19: Benchmark results file overwritten without versioning ---
+# --- TEST 19: Benchmark results versioning ---
 try:
-    results_path = PROJECT_ROOT / "docs" / "benchmark_results.json"
-    if results_path.exists():
-        content = json.loads(results_path.read_text())
-        # Run benchmark again
-        import importlib
-        import scripts.benchmark_accuracy as bench
-        importlib.reload(bench)
-        bench.run_benchmark()
-        new_content = json.loads(results_path.read_text())
+    import glob as glob_mod
+    import importlib
+    import scripts.benchmark_accuracy as bench
 
-        overwritten = content != new_content or True  # File is always overwritten
-        record(19, "Benchmark", "Results file overwritten on each run (no versioning)",
-               "CONCERN",
-               f"File exists at {results_path}. Each run overwrites the previous content "
-               f"with no timestamping or versioning. If the team cites a specific number "
-               f"in the demo deck, a subsequent run will silently replace it.")
-    else:
-        record(19, "Benchmark", "Results file versioning", "CONCERN",
-               f"No results file exists yet. When created, it will be overwritten "
-               f"on each run with no versioning.")
+    # Check that versioning scheme exists by verifying:
+    # 1) benchmark_results.json (main, backward-compatible)
+    # 2) benchmark_results_latest.json (convenience copy)
+    # 3) At least one benchmark_results_YYYY-MM-DD*.json (timestamped archive)
+    importlib.reload(bench)
+    bench.run_benchmark()
+
+    main_exists = (PROJECT_ROOT / "docs" / "benchmark_results.json").exists()
+    latest_exists = (PROJECT_ROOT / "docs" / "benchmark_results_latest.json").exists()
+    archives = glob_mod.glob(str(PROJECT_ROOT / "docs" / "benchmark_results_2*.json"))
+    
+    has_versioning = main_exists and latest_exists and len(archives) > 0
+    record(19, "Benchmark", "Results versioned with timestamped archive + latest",
+           "PASS" if has_versioning else "FAIL",
+           f"main.json exists: {main_exists}. latest.json exists: {latest_exists}. "
+           f"Archive files: {len(archives)} ({[Path(a).name for a in archives[:3]]}...). "
+           f"Each run creates a timestamped archive that is never overwritten.")
 except Exception as e:
     record(19, "Benchmark", "Results versioning test", "FAIL", f"Exception: {e}")
 

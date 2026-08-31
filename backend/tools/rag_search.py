@@ -7,6 +7,7 @@ Falls back to in-memory search if Qdrant is unreachable.
 import hashlib
 import logging
 import os
+import re
 from typing import List, Dict, Optional
 
 import numpy as np
@@ -122,6 +123,35 @@ except ImportError:
     logger.warning("rank-bm25 not installed. BM25 search unavailable.")
 
 
+# --- Sensitive content detection (defense-in-depth) ---
+#
+# Heuristic patterns that flag chunks likely containing financial/confidential
+# data.  This is NOT a complete classifier — it's a second layer of defense
+# intended to catch the common case where ingestion-time metadata tagging
+# misclassifies a chunk.  A determined adversarial document could still
+# evade these simple keyword/regex checks.
+#
+_SENSITIVE_PATTERNS = re.compile(
+    r'\b(?:confidential|restricted|secret|budget|salary|payroll|compensation|'
+    r'financial\s+statement|earnings|revenue|profit|loss|quarterly\s+report|'
+    r'merger\s+value|acquisition\s+price|ipo|valuation|stock\s+price|'
+    r'insider\s+trading|non-disclosure|nda)\b'
+    r'|\$\s*\d{1,3}(?:,\d{3}){2,}(?:\.\d{2})?'  # currency >= $1,000,000 (3+ comma groups)
+    r'|\b\d+(?:\.\d+)?\s*(?:million|billion|trillion)\b',  # large amounts in words
+    re.IGNORECASE,
+)
+
+def contains_sensitive_content(text: str) -> bool:
+    """
+    Heuristic check: does this text contain patterns commonly associated
+    with sensitive financial or confidential data?
+
+    This is a defense-in-depth layer, NOT a guarantee.  See module-level
+    docstring on _SENSITIVE_PATTERNS for limitations.
+    """
+    return bool(_SENSITIVE_PATTERNS.search(text))
+
+
 # --- Singleton instance ---
 _rag_instance: Optional["HybridRAG"] = None
 
@@ -191,6 +221,21 @@ class HybridRAG:
 
         texts = [c["text"] for c in chunks]
         metadatas = [c.get("metadata", {}) for c in chunks]
+
+        # --- Ingestion-time content classification (defense-in-depth) ---
+        # If a chunk contains sensitive content patterns but is NOT already
+        # tagged as restricted, auto-retag it into financials_restricted.
+        for i, (text, meta) in enumerate(zip(texts, metadatas)):
+            collection = meta.get("collection", "")
+            if collection != "financials_restricted" and contains_sensitive_content(text):
+                logger.warning(
+                    f"Content classifier: chunk {i} from '{meta.get('source', '?')}' "
+                    f"contains sensitive patterns; re-tagging from '{collection}' "
+                    f"to 'financials_restricted'"
+                )
+                metadatas[i] = dict(meta)  # copy to avoid mutating input
+                metadatas[i]["collection"] = "financials_restricted"
+                metadatas[i]["_content_retagged"] = True
 
         # Embed
         vectors = self.embedder.encode(texts)
@@ -275,6 +320,16 @@ class HybridRAG:
             collection = entry.get("metadata", {}).get("collection", "")
             if is_restricted(collection, role):
                 logger.info(f"RBAC: filtered restricted collection '{collection}' for role '{role}'")
+                continue
+            # --- Retrieval-time content filtering (defense-in-depth) ---
+            # Even if the chunk's metadata tag is unrestricted, exclude it
+            # from engineer-role results if the content itself looks sensitive.
+            # This catches ingestion-time misclassification.
+            if role == "engineer" and contains_sensitive_content(entry.get("text", "")):
+                logger.warning(
+                    f"Content filter: excluding chunk from '{collection}' "
+                    f"for role '{role}' — sensitive content detected in text"
+                )
                 continue
             results.append(entry)
             if len(results) >= top_k:

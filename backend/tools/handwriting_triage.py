@@ -87,15 +87,11 @@ def read_note(image_path: str) -> dict:
     else:
         confidence = 0.0
 
-    # Ensure confidence is a valid float (fail-safe: None -> 0.0 triggers warning)
-    if confidence is None or not isinstance(confidence, (int, float)):
-        confidence = 0.0
+    from backend.tools.confidence_helpers import safe_confidence, apply_confidence_warning
+    confidence = safe_confidence(confidence)
 
-    # Low confidence warning: if below 0.6, prepend a human-review notice
-    display_text = text
-    if confidence < 0.6 and text and text != "No text detected":
-        display_text = f"\u26a0\ufe0f LOW CONFIDENCE - HUMAN REVIEW REQUIRED: {text}"
-        logger.warning(f"Handwriting confidence {confidence:.3f} below 0.6 threshold")
+    # Step 4: Apply low-confidence warning if needed
+    display_text = apply_confidence_warning(text, confidence, tool_name="HandwritingTriage")
 
     result = {
         "text": display_text,
