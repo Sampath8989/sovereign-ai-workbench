@@ -1,0 +1,19 @@
+SOP-44: Corrosion Inspection Protocol
+
+Subject: Pressure Vessel Corrosion Limits
+Date: 2024-11-15
+Author: Engineering Department
+
+1. Scope
+This SOP defines the corrosion inspection limits for pressure vessels in the facility.
+
+2. Corrosion Limits
+The maximum allowable corrosion depth for pressure vessels is 5mm. Any vessel showing corrosion exceeding 5mm must be immediately taken out of service and reported to the safety officer.
+
+3. Inspection Frequency
+All pressure vessels must be inspected quarterly using ultrasonic thickness measurement.
+
+4. Documentation
+All inspection results must be recorded in the maintenance log and reported to the engineering manager.
+
+Reference: ASME Section VIII, Division 1

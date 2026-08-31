@@ -8,6 +8,11 @@ from typing import Dict
 
 from backend.core.model_manager import ModelManager
 from backend.tools.file_io import read_file, write_file
+from backend.tools.calculator import solve_expression
+from backend.tools.doc_generator import generate_doc
+from backend.tools.ppt_generator import generate_ppt
+from backend.tools.spreadsheet_analyzer import read_sheet
+from backend.tools.spreadsheet_generator import generate_sheet
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,16 @@ def execute_step(step: dict, context: dict, model_manager: ModelManager = None) 
         result = _execute_llm(action, args, context, model_manager)
     elif tool == "code":
         result = _execute_code(action, args)
+    elif tool == "calculator":
+        result = _execute_calculator(args)
+    elif tool == "doc_generator":
+        result = _execute_doc_generator(args)
+    elif tool == "ppt_generator":
+        result = _execute_ppt_generator(args)
+    elif tool == "spreadsheet_generator":
+        result = _execute_spreadsheet_generator(args)
+    elif tool == "spreadsheet_analyzer":
+        result = _execute_spreadsheet_analyzer(args)
     else:
         result = f"Error: Unknown tool '{tool}'"
 
@@ -117,3 +132,43 @@ def _execute_code(action: str, args: list) -> str:
             return f"Error executing code: {e}"
     else:
         return f"Error: Unknown code action '{action}'"
+
+
+def _execute_calculator(args: list) -> str:
+    """Execute the symbolic calculator tool."""
+    expression = args[0] if args else ""
+    return solve_expression(expression)
+
+
+def _execute_doc_generator(args: list) -> str:
+    """Execute the Word document generator tool."""
+    filename = args[0] if len(args) > 0 else "output.docx"
+    title = args[1] if len(args) > 1 else "Untitled"
+    content = args[2] if len(args) > 2 else ""
+    return generate_doc(filename, title, content)
+
+
+def _execute_ppt_generator(args: list) -> str:
+    """Execute the PowerPoint generator tool."""
+    filename = args[0] if len(args) > 0 else "output.pptx"
+    title = args[1] if len(args) > 1 else "Untitled"
+    bullet_points = args[2] if len(args) > 2 else []
+    if isinstance(bullet_points, str):
+        bullet_points = [bullet_points]
+    return generate_ppt(filename, title, bullet_points)
+
+
+def _execute_spreadsheet_generator(args: list) -> str:
+    """Execute the spreadsheet generator tool."""
+    filename = args[0] if len(args) > 0 else "output.xlsx"
+    data = args[1] if len(args) > 1 else [["", ""]]
+    return generate_sheet(filename, data)
+
+
+def _execute_spreadsheet_analyzer(args: list) -> str:
+    """Execute the spreadsheet analyzer tool."""
+    filename = args[0] if len(args) > 0 else ""
+    cell_range = args[1] if len(args) > 1 else "A1:D50"
+    data = read_sheet(filename, cell_range)
+    # Return data as a string representation
+    return str(data)

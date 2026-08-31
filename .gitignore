@@ -35,6 +35,7 @@ Thumbs.db
 
 # Workspace (sandbox files)
 workspace/sandbox_files/
+workspace/outputs/
 
 # Models (large files)
 models/*.gguf

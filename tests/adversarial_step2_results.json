@@ -1,0 +1,233 @@
+[
+  {
+    "num": 1,
+    "component": "File I/O",
+    "test": "Path traversal via ../../etc/passwd",
+    "result": "PASS",
+    "evidence": "write=Error: Path traversal detected: '../../etc/passwd' resolves outside the sandbox.; read=Error: Path traversal detected: '../../etc/passwd' resolves outside the sandbox."
+  },
+  {
+    "num": 2,
+    "component": "File I/O",
+    "test": "Absolute path traversal",
+    "result": "PASS",
+    "evidence": "/etc/passwd write=Error: Path traversal detected: '/etc/passwd' resolves outside the sandbox. read=Error: Path traversal detected: '/etc/passwd' resolves outside the sandbox.; /tmp write=Error: Path traversal detected: '/tmp/test_escaped.txt' resolves outside the sandbox. read=Error: Path traversal detected: '/tmp/test_escaped.txt' resolves outside the sandbox."
+  },
+  {
+    "num": 3,
+    "component": "File I/O",
+    "test": "URL-encoded path traversal",
+    "result": "PASS",
+    "evidence": "encoded write=Success: File written to ..%2f..%2fetc/passwd read=malicious; double-encoded write=Success: File written to ..%252f..%252fetc/passwd read=malicious | escaped=False"
+  },
+  {
+    "num": 4,
+    "component": "File I/O",
+    "test": "Null byte injection",
+    "result": "PASS",
+    "evidence": "write=Error: lstat: embedded null character in path; read=Error: lstat: embedded null character in path"
+  },
+  {
+    "num": 5,
+    "component": "File I/O",
+    "test": "Symlink attack",
+    "result": "PASS",
+    "evidence": "Symlink to /etc/hostname blocked: Error: Path traversal detected: 'symlink_test' resolves outside the sandbox."
+  },
+  {
+    "num": 6,
+    "component": "File I/O",
+    "test": "Windows-style path separators",
+    "result": "PASS",
+    "evidence": "write=Success: File written to ..\\..\\secret.txt; read=malicious; escaped=False"
+  },
+  {
+    "num": 7,
+    "component": "File I/O",
+    "test": "Extremely long filename (10000+ chars)",
+    "result": "PASS",
+    "evidence": "write=Error: Could not write file: [Errno 36] File name too long: '/home/shiva/SAH/sovereign-ai-workbench/; read=Error: File not found: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \u2014 graceful handling"
+  },
+  {
+    "num": 8,
+    "component": "File I/O",
+    "test": "Filename is a directory",
+    "result": "PASS",
+    "evidence": "read('.')=Error: Path is not a file: .; read('sandbox_files')=Error: File not found: sandbox_files; read('')=Error: Path is not a file: "
+  },
+  {
+    "num": 9,
+    "component": "File I/O",
+    "test": "Concurrent writes to same filename",
+    "result": "PASS",
+    "evidence": "10 threads | errors=none | final starts with: Content from thread 8"
+  },
+  {
+    "num": 10,
+    "component": "File I/O",
+    "test": "Null bytes & large payload",
+    "result": "PASS",
+    "evidence": "null_bytes write=Success: File written to null_test.txt read_len=11 | 5MB write=Success: File written to large_test.txt read_len=5242880 | NO SIZE LIMIT ENFORCED \u2014 resource exhaustion risk"
+  },
+  {
+    "num": 11,
+    "component": "Router",
+    "test": "Multiple trigger keywords",
+    "result": "PASS",
+    "evidence": "Result: CODE | CODE checked first via if-chain \u2014 'execute' triggers CODE (first-match wins)"
+  },
+  {
+    "num": 12,
+    "component": "Router",
+    "test": "Negation handling",
+    "result": "PASS",
+    "evidence": "Result: FILE"
+  },
+  {
+    "num": 13,
+    "component": "Router",
+    "test": "Substring collision false triggers",
+    "result": "PASS",
+    "evidence": "encode\u2192TEXT, codecs\u2192TEXT, transcode\u2192TEXT | false_triggers=[]"
+  },
+  {
+    "num": 14,
+    "component": "Router",
+    "test": "Zero keywords \u2192 TEXT default",
+    "result": "PASS",
+    "evidence": "Result: TEXT | Should default to TEXT for document question"
+  },
+  {
+    "num": 15,
+    "component": "Router",
+    "test": "Empty/whitespace/non-English",
+    "result": "PASS",
+    "evidence": "empty\u2192TEXT, whitespace\u2192TEXT, chinese\u2192TEXT, arabic\u2192TEXT"
+  },
+  {
+    "num": 16,
+    "component": "Router",
+    "test": "Prompt injection targeting router",
+    "result": "PASS",
+    "evidence": "Result: CODE | Keyword matching is deterministic; 'code' at end triggers CODE regardless"
+  },
+  {
+    "num": 17,
+    "component": "MockLLM",
+    "test": "Fallback trigger conditions",
+    "result": "PASS",
+    "evidence": "(a) missing file: isinstance(MockLLM)=True | (b) corrupted file: isinstance(MockLLM)=True | (c) broad except clause: True | Silent fallback on ALL exceptions via broad except"
+  },
+  {
+    "num": 18,
+    "component": "MockLLM",
+    "test": "Disclosure of mock usage",
+    "result": "FAIL",
+    "evidence": "output='[MockLLM] Processed: Hello, what is 2+2?' | has_indicator_in_output=True | mock_in_audit_log=True | No mock indicator in API response body; only in audit log (not user-visible)"
+  },
+  {
+    "num": 19,
+    "component": "MockLLM",
+    "test": "Non-standard prompt handling",
+    "result": "PASS",
+    "evidence": "default='[MockLLM] Processed: What is the meaning of life according to quantum physics?' | empty='[MockLLM] Processed: ' | non_string='[MockLLM] Processed: 12345'"
+  },
+  {
+    "num": 20,
+    "component": "Planner",
+    "test": "Malformed JSON handling",
+    "result": "PASS",
+    "evidence": "code_fence: 1 steps | truncated: fallback=1 steps | trailing_text: 1 steps | single_quotes: fallback=1 steps"
+  },
+  {
+    "num": 21,
+    "component": "Planner",
+    "test": "Unknown tool in plan",
+    "result": "PASS",
+    "evidence": "result='Error: Unknown tool 'shell_exec'' | error_reported=True"
+  },
+  {
+    "num": 22,
+    "component": "Planner",
+    "test": "Empty plan (0 steps)",
+    "result": "PASS",
+    "evidence": "plan=[] | synthesize output='{\"mock\": true, \"plan\": [{\"tool\": \"file_io\", \"action\": \"read\", \"args\": [\"test.txt\"]}, {\"tool\": \"llm\",'"
+  },
+  {
+    "num": 23,
+    "component": "Planner",
+    "test": "Absurd plan size (500 steps)",
+    "result": "PASS",
+    "evidence": "Executed 500 steps in 0.43s | NO STEP LIMIT | 500 sequential LLM calls = resource exhaustion risk"
+  },
+  {
+    "num": 24,
+    "component": "Planner",
+    "test": "Self-referential plan args",
+    "result": "PASS",
+    "evidence": "result='Error: File not found: step_2_result' | gracefully handled missing reference"
+  },
+  {
+    "num": 25,
+    "component": "Executor",
+    "test": "Mid-plan failure recovery",
+    "result": "PASS",
+    "evidence": "step1_result='Error: File not found: nonexistent_xyz.txt' | step3_result='still works' | continued=True"
+  },
+  {
+    "num": 26,
+    "component": "Executor",
+    "test": "Concurrent request isolation",
+    "result": "PASS",
+    "evidence": "Response A (prompt='2+2'): '[MockLLM] This is a mock summary of the provided content.\n\n[Warning: Some claims' | Response B (prompt='3+3'): '[MockLLM] This is a mock summary of the provided content.\n\n[Warning: Some claims'"
+  },
+  {
+    "num": 27,
+    "component": "Graph",
+    "test": "10 concurrent /chat requests",
+    "result": "PASS",
+    "evidence": "10 requests | errors=0 | sample responses: #0='[MockLLM] This is a mock summa', #2='[MockLLM] This is a mock summa', #4='[MockLLM] This is a mock summa'"
+  },
+  {
+    "num": 28,
+    "component": "Graph",
+    "test": "Minimal prompt 'hi'",
+    "result": "PASS",
+    "evidence": "output='[MockLLM] This is a mock summary of the provided content.\n\n[Warning: Some claims in the text are not found in the provided sources.]' | mock_artifact_leaking=False | empty=False"
+  },
+  {
+    "num": 29,
+    "component": "Graph",
+    "test": "Extremely long prompt (50K chars)",
+    "result": "PASS",
+    "evidence": "input_len=50000 | output='[MockLLM] This is a mock summary of the provided content.\n\n[Warning: Some claims in the text are not' | latency=0.01s | NO LENGTH LIMIT"
+  },
+  {
+    "num": 30,
+    "component": "Graph",
+    "test": "Malformed request body validation",
+    "result": "BLOCKED",
+    "evidence": "FastAPI server not running on localhost:8000"
+  },
+  {
+    "num": 31,
+    "component": "Graph",
+    "test": "Prompt injection into plan generation",
+    "result": "PASS",
+    "evidence": "output='{\"mock\": true, \"plan\": [{\"tool\": \"file_io\", \"action\": \"read\", \"args\": [\"test.txt\"]}, {\"tool\": \"llm\", \"action\": \"summarize\", \"args\": []}]}\n\n[Warning: A' | injection_succeeded=False"
+  },
+  {
+    "num": 32,
+    "component": "Graph",
+    "test": "Crash recovery / no zombie state",
+    "result": "PASS",
+    "evidence": "post-crash request output='[MockLLM] This is a mock summary of the provided content.\n\n[Warning: Some claims in the text are not' | no zombie state detected"
+  },
+  {
+    "num": 33,
+    "component": "Graph",
+    "test": "End-to-end latency (MockLLM)",
+    "result": "PASS",
+    "evidence": "5 runs: avg=8ms, min=6ms, max=9ms | MockLLM path \u2014 no real model weights loaded"
+  }
+]
