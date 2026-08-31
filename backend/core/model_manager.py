@@ -6,6 +6,7 @@ MockLLM fallback: If model files are missing or llama-cpp-python fails to load,
 a deterministic MockLLM is used so the agent graph can still be tested end-to-end.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -20,6 +21,36 @@ from backend.config import get_model_path, get_model_roster, get_max_vram_gb, ge
 from backend.core.audit_log import AuditLogger
 
 logger = logging.getLogger(__name__)
+
+# Negation markers shared with backend/core/router.py for consistency.
+# Words/phrases that negate a following keyword within a short window.
+_NEGATION_MARKERS_RE = re.compile(
+    r'\b(do\s+not|don\'t|dont|never|avoid|without|no|skip|refrain\s+from)\b'
+)
+_NEGATION_WINDOW = 5
+
+
+def _is_keyword_negated(lower_text: str, keyword: str) -> bool:
+    """
+    Check if a keyword in lower_text is preceded by a negation marker
+    within a ~5-word window and within the same clause.
+    Reuses the same heuristic as backend/core/router.py._is_negated.
+    """
+    idx = lower_text.find(keyword)
+    if idx < 0:
+        return False
+    preceding = lower_text[:idx]
+    # Find nearest clause boundary
+    clause_start = 0
+    for sep in [',', '.', ';', ' - ', ' \u2014 ']:
+        pos = preceding.rfind(sep)
+        if pos > clause_start:
+            clause_start = pos + len(sep)
+    clause_text = preceding[clause_start:]
+    words = clause_text.split()
+    window = words[-_NEGATION_WINDOW:] if len(words) >= _NEGATION_WINDOW else words
+    return bool(_NEGATION_MARKERS_RE.search(" ".join(window)))
+
 
 # Try importing llama_cpp
 try:
@@ -109,7 +140,28 @@ class MockVisionModel:
     """
     Deterministic mock vision model for testing without real VL weights.
     Returns hardcoded OCR text based on the prompt content.
+
+    NOTE: This is a mock/demo stub — NOT a real vision model. The confidence
+    values and text it returns are deterministic artifacts for testing, not
+    calibrated accuracy. Do not mistake mock outputs for real model performance.
     """
+
+    @staticmethod
+    def _image_hash_seed(image_path: str) -> int:
+        """
+        Derive a deterministic integer seed from the image file's actual bytes.
+        Used so that different images produce different (but reproducible)
+        mock confidence values, preventing the optics problem of "two different
+        images, identical confidence score."
+
+        Falls back to a hash of the path string if the file cannot be read.
+        """
+        try:
+            with open(image_path, "rb") as f:
+                data = f.read(4096)  # read first 4 KB for efficiency
+            return int(hashlib.md5(data).hexdigest()[:8], 16)
+        except (OSError, IOError):
+            return int(hashlib.md5(image_path.encode()).hexdigest()[:8], 16)
 
     def analyze_image(self, image_path: str, prompt: str) -> str:
         """
@@ -141,6 +193,22 @@ class MockVisionModel:
 
         # Generic fallback
         return f"MockVisionModel analysis of {Path(image_path).name}: {prompt[:100]}"
+
+    def get_mock_confidence(self, image_path: str) -> float:
+        """
+        Return a deterministic but image-responsive mock confidence score.
+
+        The score is derived from a hash of the image file's actual bytes,
+        so different images produce different values (solving the "two images,
+        identical confidence" demo optics problem). The range is [0.50, 0.95]
+        to look plausible without claiming real accuracy.
+
+        This is MOCK/DEMO behavior only — not calibrated model confidence.
+        """
+        seed = self._image_hash_seed(image_path)
+        # Map the 32-bit hash seed to [0.50, 0.95]
+        confidence = 0.50 + (seed % 4500) / 10000.0
+        return round(confidence, 3)
 
 
 class MockLLM:
@@ -238,24 +306,27 @@ class MockLLM:
             ]
             return self._wrap_plan(plan)
 
-        # P&ID / topology extraction
-        if any(kw in lower for kw in ["p&pid", "topology", "pid extractor", "extract topology"]):
+        # P&ID / topology extraction (negation-aware)
+        pid_keywords = ["p&pid", "topology", "pid extractor", "extract topology"]
+        if any(kw in lower and not _is_keyword_negated(lower, kw) for kw in pid_keywords):
             plan = [
                 {"tool": "pid_extractor", "action": "extract",
                  "args": ["workspace/sandbox_files/test_pid.png"]}
             ]
             return self._wrap_plan(plan)
 
-        # Handwriting triage
-        if any(kw in lower for kw in ["handwriting", "handwritten", "read note", "field note"]):
+        # Handwriting triage (negation-aware)
+        hw_keywords = ["handwriting", "handwritten", "read note", "field note"]
+        if any(kw in lower and not _is_keyword_negated(lower, kw) for kw in hw_keywords):
             plan = [
                 {"tool": "handwriting_triage", "action": "read",
                  "args": ["workspace/sandbox_files/test_note.jpg"]}
             ]
             return self._wrap_plan(plan)
 
-        # Photo / nameplate analysis
-        if any(kw in lower for kw in ["photo", "nameplate", "field photo", "equipment photo"]):
+        # Photo / nameplate analysis (negation-aware)
+        photo_keywords = ["photo", "nameplate", "field photo", "equipment photo"]
+        if any(kw in lower and not _is_keyword_negated(lower, kw) for kw in photo_keywords):
             plan = [
                 {"tool": "photo_analyzer", "action": "analyze",
                  "args": ["workspace/sandbox_files/test_photo.jpg"]}
