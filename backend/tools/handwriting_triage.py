@@ -55,7 +55,14 @@ def read_note(image_path: str) -> dict:
     Returns:
         A dict with "text", "confidence", and "source" keys.
     """
-    image_path = str(Path(image_path).resolve())
+    # Path containment: reject paths that escape the sandbox directory
+    from backend.tools.path_safety import safe_resolve_input_path
+    _sandbox_dir = Path(__file__).resolve().parent.parent.parent / "workspace" / "sandbox_files"
+    try:
+        resolved = safe_resolve_input_path(image_path, _sandbox_dir)
+    except ValueError as e:
+        raise ValueError(f"Handwriting triage rejected path: {e}")
+    image_path = str(resolved)
 
     # Step 1: Preprocess
     preprocessed = _preprocess_image(image_path)
@@ -68,9 +75,11 @@ def read_note(image_path: str) -> dict:
     # Step 3: Clean up and generate confidence
     text = raw_text.strip() if raw_text else "No text detected"
 
-    # Mock confidence based on text length and content
+    # Mock confidence: derived from image file bytes (not mock text length)
+    # so different images produce different, deterministic confidence values.
+    # This is MOCK/DEMO behavior only — not calibrated model confidence.
     if text and text != "No text detected":
-        confidence = min(0.95, 0.70 + len(text) * 0.002)
+        confidence = vision.get_mock_confidence(image_path)
     else:
         confidence = 0.0
 

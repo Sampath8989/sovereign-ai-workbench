@@ -49,6 +49,42 @@ def safe_resolve_output_path(filename: str, base_dir: Path) -> Path:
     return output_path
 
 
+def safe_resolve_input_path(image_path: str, base_dir: Path) -> Path:
+    """
+    Resolve an input file path against a base directory, enforcing containment.
+    Used by vision tools (pid_extractor, handwriting_triage, photo_analyzer) to
+    prevent path-traversal attacks that could read arbitrary files from disk.
+
+    Args:
+        image_path: User-supplied path (e.g., "workspace/sandbox_files/note.jpg").
+        base_dir: The directory that must contain the resolved path.
+
+    Returns:
+        Resolved Path inside base_dir.
+
+    Raises:
+        ValueError: If the path escapes the base directory, contains null bytes,
+                    or the filename is too long.
+    """
+    if "\x00" in image_path:
+        raise ValueError("Path contains null bytes.")
+
+    if len(image_path) > MAX_FILENAME_LENGTH:
+        raise ValueError(
+            f"Path too long ({len(image_path)} chars, max {MAX_FILENAME_LENGTH})."
+        )
+
+    resolved = Path(image_path).resolve()
+    base_resolved = base_dir.resolve()
+
+    if not _is_within_dir(resolved, base_resolved):
+        raise ValueError(
+            f"Path traversal detected: '{image_path}' resolves outside the allowed sandbox directory."
+        )
+
+    return resolved
+
+
 def _is_within_dir(path: Path, directory: Path) -> bool:
     """Check if path is inside directory (or is the directory itself)."""
     try:

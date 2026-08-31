@@ -75,7 +75,14 @@ def analyze_nameplate(image_path: str) -> dict:
     Returns:
         A dict with equipment_type, model, serial, manufacturer, raw_text.
     """
-    image_path = str(Path(image_path).resolve())
+    # Path containment: reject paths that escape the sandbox directory
+    from backend.tools.path_safety import safe_resolve_input_path
+    _sandbox_dir = Path(__file__).resolve().parent.parent.parent / "workspace" / "sandbox_files"
+    try:
+        resolved = safe_resolve_input_path(image_path, _sandbox_dir)
+    except ValueError as e:
+        raise ValueError(f"Photo analyzer rejected path: {e}")
+    image_path = str(resolved)
 
     # Step 1: Call Vision Model
     vision = _get_vision_model()

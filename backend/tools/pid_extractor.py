@@ -93,7 +93,14 @@ def extract_topology(image_path: str) -> dict:
     Returns:
         A dict with "nodes" and "edges" lists.
     """
-    image_path = str(Path(image_path).resolve())
+    # Path containment: reject paths that escape the sandbox directory
+    from backend.tools.path_safety import safe_resolve_input_path
+    _sandbox_dir = Path(__file__).resolve().parent.parent.parent / "workspace" / "sandbox_files"
+    try:
+        resolved = safe_resolve_input_path(image_path, _sandbox_dir)
+    except ValueError as e:
+        raise ValueError(f"P&ID extractor rejected path: {e}")
+    image_path = str(resolved)
 
     # Step 1: Run YOLO
     if _YOLO_AVAILABLE:
