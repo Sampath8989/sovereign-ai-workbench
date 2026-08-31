@@ -8,6 +8,7 @@ a deterministic MockLLM is used so the agent graph can still be tested end-to-en
 
 import json
 import os
+import re
 import subprocess
 import time
 import logging
@@ -155,23 +156,78 @@ class MockLLM:
         lower = text.lower()
 
         # If asked for a JSON plan, return a hardcoded plan with mock indicator
-        if "plan" in lower or "steps" in lower or "decompose" in lower:
+        # Use word-boundary matching to avoid false positives (e.g., 'plan' in 'explanation')
+        if (re.search(r'\bplan\b', lower) or re.search(r'\bsteps\b', lower) or
+                re.search(r'\bdecompos', lower)):
             plan = [
                 {"tool": "file_io", "action": "read", "args": ["test.txt"]},
                 {"tool": "llm", "action": "summarize", "args": []}
             ]
             return self._wrap_plan(plan)
 
+        # If asked to verify / citation check, return a deterministic verdict
+        if 'verdict' in lower or 'citation verif' in lower or 'grounded' in lower:
+            # Check whether source text actually appears in the generated text
+            has_source_evidence = self._check_grounding(text)
+            if has_source_evidence:
+                return self._wrap_response(
+                    "VERDICT: YES\nREASON: All claims in the text are present in the provided sources."
+                )
+            else:
+                return self._wrap_response(
+                    "VERDICT: NO\nREASON: Some claims in the text are not found in the provided sources."
+                )
+
+        # If source content is present in the prompt, prioritize returning grounded source text
+        source_section = self._extract_sources(text)
+        if source_section:
+            return self._wrap_response(source_section)
+
         # If asked to summarize, return a mock summary
         if "summar" in lower:
             return self._wrap_response("This is a mock summary of the provided content.")
 
-        # Default response
-        return self._wrap_response(f"Processed: {text[:120]}")
+        return self._wrap_response(f"Processed: {text[:500]}")
+
+    @staticmethod
+    def _check_grounding(text: str) -> bool:
+        """Simple heuristic: extract the generated-text section and source-text
+        section from the verifier prompt, and check whether key tokens from the
+        sources appear in the generated text."""
+        # Find 'Generated text:' and 'Sources:' markers
+        gen_start = text.lower().find('generated text:')
+        src_start = text.lower().find('sources:')
+        if gen_start < 0 or src_start < 0:
+            return False
+        generated = text[gen_start:src_start].lower()
+        sources = text[src_start:].lower()
+        # Extract meaningful tokens from sources (skip common words)
+        stop = {'the', 'a', 'an', 'is', 'are', 'was', 'in', 'or', 'from', 'and', 'of', 'for', 'to', 'if', 'be', 'not'}
+        source_tokens = {w for w in re.split(r'\W+', sources) if len(w) > 2 and w not in stop}
+        if not source_tokens:
+            return False
+        # Check overlap
+        overlap = sum(1 for t in source_tokens if t in generated)
+        return overlap >= 2  # at least 2 meaningful tokens match
+
+    @staticmethod
+    def _extract_sources(text: str) -> str:
+        """If the prompt contains 'Retrieved sources:' or 'Sources:', return the
+        full source text so the mock response echoes back the retrieved context."""
+        for marker in ["Retrieved sources:", "Sources:", "sources:"]:
+            idx = text.find(marker)
+            if idx >= 0:
+                return text[idx:]
+        return ""
 
     def create_completion(self, prompt: str, **kwargs) -> dict:
         """Alias for create_chat_completion with a plain string."""
         return self.create_chat_completion(prompt, **kwargs)
+
+    def generate(self, prompt: str, **kwargs) -> str:
+        """Generate from a plain string prompt (used by verifier)."""
+        output = self.create_chat_completion(prompt, **kwargs)
+        return output["choices"][0]["text"]
 
     def close(self):
         pass
