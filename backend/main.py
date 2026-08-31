@@ -10,12 +10,13 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Request
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.config import get_tier, get_max_vram_gb, get_model_roster
 from backend.core.audit_log import AuditLogger, verify_chain
+from backend.core.auth import get_role
 from backend.core.model_manager import ModelManager
 from backend.core.sandbox_manager import SandboxManager
 from backend.infra.sentinel_runner import SovereignSentinel
@@ -133,15 +134,17 @@ async def health():
 
 
 @app.post("/chat")
-async def chat_endpoint(req: ChatRequest):
+async def chat_endpoint(req: ChatRequest, role: str = Depends(get_role)):
     """
     Agent chat endpoint. Invokes the LangGraph ReWOO orchestrator:
     plan -> execute -> synthesize.
+
+    The ``role`` query parameter controls RBAC filtering on retrieved sources.
     """
     try:
         from backend.agents.graph import app as graph_app
 
-        result = graph_app.invoke({"input": req.prompt})
+        result = graph_app.invoke({"input": req.prompt, "role": role})
         return {"response": result.get("output", "")}
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}")
@@ -411,3 +414,30 @@ async def get_last_audit_entry():
 
     entry = audit_logger.get_last_entry()
     return {"entry": entry}
+
+
+@app.get("/benchmark")
+async def benchmark_endpoint():
+    """
+    Run the pre-demo benchmarking script and return accuracy metrics.
+
+    If ``docs/benchmark_results.json`` already exists, returns its contents.
+    Otherwise executes the benchmark inline.
+    """
+    try:
+        from pathlib import Path
+        import json
+
+        results_path = Path(__file__).parent.parent / "docs" / "benchmark_results.json"
+
+        # Return cached results if available
+        if results_path.exists():
+            return json.loads(results_path.read_text(encoding="utf-8"))
+
+        # Run benchmark inline
+        from scripts.benchmark_accuracy import run_benchmark
+        metrics = run_benchmark()
+        return metrics
+    except Exception as e:
+        logger.error(f"Benchmark error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

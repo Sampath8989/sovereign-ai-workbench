@@ -83,8 +83,15 @@ def read_note(image_path: str) -> dict:
     else:
         confidence = 0.0
 
+    # Low confidence warning: if below 0.6, prepend a human-review notice
+    display_text = text
+    if confidence < 0.6 and text and text != "No text detected":
+        display_text = f"⚠️ LOW CONFIDENCE - HUMAN REVIEW REQUIRED: {text}"
+        logger.warning(f"Handwriting confidence {confidence:.3f} below 0.6 threshold")
+
     result = {
-        "text": text,
+        "text": display_text,
+        "raw_text": text,
         "confidence": round(confidence, 3),
         "source": Path(image_path).name,
     }

@@ -231,7 +231,7 @@ class HybridRAG:
 
         return len(texts)
 
-    def search(self, query: str, top_k: int = 3) -> List[Dict]:
+    def search(self, query: str, top_k: int = 3, role: str = "engineer") -> List[Dict]:
         """
         Hybrid search: dense (Qdrant or in-memory) + sparse (BM25).
         Merges results via reciprocal rank fusion.
@@ -239,6 +239,8 @@ class HybridRAG:
         Args:
             query: Search query string.
             top_k: Number of results to return.
+            role: User role for RBAC filtering (default: "engineer").
+                  Engineers cannot see restricted collections; managers see all.
 
         Returns:
             List of {"text": "...", "metadata": {...}, "score": float}.
@@ -264,11 +266,19 @@ class HybridRAG:
         # Sort by RRF score
         sorted_keys = sorted(rrf_scores.keys(), key=lambda k: rrf_scores[k], reverse=True)
 
+        # --- RBAC filtering ---
+        from backend.core.auth import is_restricted
         results = []
-        for key in sorted_keys[:top_k]:
+        for key in sorted_keys:
             entry = dict(rrf_data[key])
             entry["score"] = rrf_scores[key]
+            collection = entry.get("metadata", {}).get("collection", "")
+            if is_restricted(collection, role):
+                logger.info(f"RBAC: filtered restricted collection '{collection}' for role '{role}'")
+                continue
             results.append(entry)
+            if len(results) >= top_k:
+                break
 
         return results
 

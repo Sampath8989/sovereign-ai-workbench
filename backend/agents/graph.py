@@ -36,6 +36,7 @@ class AgentState(TypedDict):
     output: str
     retrieved_sources: list
     verification: dict
+    role: str
 
 
 def plan_node(state: AgentState) -> dict:
@@ -69,12 +70,14 @@ def execute_node(state: AgentState) -> dict:
 def retrieve_node(state: AgentState) -> dict:
     """
     Retrieve relevant documents from the knowledge base.
+    Respects RBAC: role is passed through to HybridRAG.search().
     """
-    logger.info(f"retrieve_node: Searching KB for: {state['input'][:100]}")
+    role = state.get("role", "engineer")
+    logger.info(f"retrieve_node: Searching KB for: {state['input'][:100]} (role={role})")
     
     try:
         rag = get_rag()
-        sources = rag.search(state["input"], top_k=3)
+        sources = rag.search(state["input"], top_k=3, role=role)
         logger.info(f"retrieve_node: Found {len(sources)} sources")
         
         # Update context with retrieved sources
