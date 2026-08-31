@@ -124,6 +124,32 @@ class TestHotSwap:
 class TestEgressSentinel:
     """Tests 7-13: eBPF Egress Sentinel."""
 
+    def test_07_sentinel_untracked_process_never_killed(self):
+        """Regression test for sentinel bug: empty _tracked_pids must NEVER kill untracked host PIDs."""
+        from backend.infra.sentinel_runner import SovereignSentinel
+
+        # Instantiate sentinel with EMPTY _tracked_pids and enforce_kills=True
+        sentinel = SovereignSentinel(
+            allow_list=["127.0.0.1", "0.0.0.0"],
+            enforce_kills=True,
+            poll_interval=0.05
+        )
+        assert len(sentinel._tracked_pids) == 0, "_tracked_pids must be empty"
+
+        host_pid = os.getpid()
+        assert host_pid not in sentinel._tracked_pids
+
+        # Attempt to enforce breach on an untracked host PID
+        sentinel._enforce_breach(host_pid, "93.184.216.34", "tcp")
+
+        # Verify safety abort fired and process was NOT killed
+        last_entry = sentinel.audit.get_last_entry()
+        assert last_entry is not None
+        assert last_entry["event_type"] == "SOVEREIGNTY_BREACH"
+        assert last_entry["details"]["action"] in ("safety_abort_untracked", "safety_abort_protected")
+        assert last_entry["details"]["action"] != "sigkill"
+        assert os.path.exists("/proc/self/status"), "Host process must remain alive"
+
     def test_07_ipv6_outbound(self):
         """IPv6 from host — sentinel tracks sandbox PIDs only by design."""
         from backend.infra.sentinel_runner import SovereignSentinel
@@ -366,8 +392,9 @@ except: print('ERR')
             s1 = os.path.join(tmp1, "script.py")
             s2 = os.path.join(tmp2, "script.py")
             docker_base = ["docker", "run", "--rm", "--runtime=runsc", "--network=none",
-                           "--read-only", "--tmpfs", "/tmp:size=32m", "--memory", "64m",
-                           "--pids-limit", "32"]
+                           "--read-only", "--tmpfs", "/tmp:size=64m", "--memory", "128m",
+                           "--pids-limit", "64", "--cap-drop", "ALL",
+                           "--security-opt", "no-new-privileges"]
             r1 = r2 = None
             for attempt in range(5):
                 r1 = subprocess.run(

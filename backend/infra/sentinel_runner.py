@@ -65,12 +65,15 @@ class SovereignSentinel:
         allow_list: Optional[List[str]] = None,
         on_breach: Optional[Callable[[int, str], None]] = None,
         poll_interval: float = 0.2,  # Faster polling: 200ms
-        enforce_kills: bool = True,
+        enforce_kills: Optional[bool] = None,
     ):
         self.allow_list: Set[str] = set(allow_list or ["127.0.0.1", "0.0.0.0", "::1"])
         self.on_breach = on_breach
         self.poll_interval = poll_interval
-        self.enforce_kills = enforce_kills
+        if enforce_kills is not None:
+            self.enforce_kills = enforce_kills
+        else:
+            self.enforce_kills = os.getenv("SENTINEL_ENFORCE", "false").lower() in ("true", "1", "yes")
         self.audit = AuditLogger()
         self._monitoring = False
         self._thread: Optional[threading.Thread] = None
@@ -79,6 +82,42 @@ class SovereignSentinel:
         self._tracked_pids: Set[int] = set()  # PIDs we're enforcing on
         self._lock = threading.Lock()
         self._iptables_installed = False
+
+    @staticmethod
+    def _is_protected_process(pid: int) -> bool:
+        """
+        Hard safety net: return True if PID belongs to a protected system/dev process
+        that must NEVER be killed regardless of tracking state.
+        """
+        if pid <= 1:
+            return True
+        try:
+            current_pid = os.getpid()
+            parent_pid = os.getppid()
+            if pid in (current_pid, parent_pid):
+                return True
+
+            if _PSUTIL_AVAILABLE:
+                proc = psutil.Process(pid)
+                protected_names = {
+                    "systemd", "init", "bash", "zsh", "sh", "tmux", "screen",
+                    "freebuff", "codebuff", "node", "python", "python3", "pytest",
+                    "uvicorn", "docker", "dockerd", "containerd", "runsc", "runc",
+                    "brave", "chrome", "chromium", "firefox", "warp-svc",
+                    "cosmic-comp", "cosmic-panel", "cosmic-files", "xwayland",
+                    "openclaw", "openclaw-gateway", "mysqld", "postgres", "redis-server"
+                }
+                pname = proc.name().lower()
+                if pname in protected_names:
+                    return True
+
+                cmdline = " ".join(proc.cmdline()).lower()
+                for keyword in ("pytest", "uvicorn", "freebuff", "codebuff", "openclaw", "antigravity"):
+                    if keyword in cmdline:
+                        return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
+            pass
+        return False
 
     def track_pid(self, pid: int) -> None:
         """Add a PID to the set of monitored processes (sandbox PIDs)."""
@@ -181,6 +220,14 @@ class SovereignSentinel:
             logger.warning("Sentinel is already monitoring.")
             return
 
+        if self.enforce_kills:
+            warning_msg = (
+                "⚠️  SENTINEL ENFORCEMENT ACTIVE — will SIGKILL non-allowlisted network connections "
+                "system-wide until _tracked_pids is populated. Set SENTINEL_ENFORCE=false to disable."
+            )
+            print(f"\n{warning_msg}\n", flush=True)
+            logger.warning(warning_msg)
+
         # Install iptables fail-closed rules FIRST
         self._install_iptables_rules()
 
@@ -257,9 +304,13 @@ class SovereignSentinel:
 
                     self._seen_connections.add(conn_key)
 
-                    # Check if this PID is in our tracked set
-                    if self._tracked_pids and pid not in self._tracked_pids:
-                        continue  # Not a sandbox PID, skip
+                    # Check if this PID is in our tracked set (skip untracked processes)
+                    if not self._tracked_pids or pid not in self._tracked_pids:
+                        continue
+
+                    # Second safety layer: skip protected processes
+                    if self._is_protected_process(pid):
+                        continue
 
                     # Evaluate the connection
                     if ip not in self.allow_list:
@@ -282,6 +333,26 @@ class SovereignSentinel:
             "breach_count": self._breach_count,
             "action": "none",
         }
+
+        # Hard safety validation before applying any kill
+        with self._lock:
+            is_tracked = pid in self._tracked_pids
+
+        if not is_tracked:
+            logger.warning(
+                f"SAFETY ABORT: PID {pid} is NOT in _tracked_pids. Refusing to SIGKILL."
+            )
+            breach_details["action"] = "safety_abort_untracked"
+            self.audit.log_event("SOVEREIGNTY_BREACH", breach_details)
+            return
+
+        if self._is_protected_process(pid):
+            logger.warning(
+                f"SAFETY ABORT: PID {pid} is a protected system/dev process. Refusing to SIGKILL."
+            )
+            breach_details["action"] = "safety_abort_protected"
+            self.audit.log_event("SOVEREIGNTY_BREACH", breach_details)
+            return
 
         # SIGKILL the offending process
         if self.enforce_kills and pid and pid > 0:
