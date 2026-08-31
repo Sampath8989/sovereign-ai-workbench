@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -26,6 +26,9 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Maximum upload size: 20 MB (generous for P&ID scans, handwritten notes, nameplate photos)
+MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB
 
 # Module-level singletons (initialized at startup)
 model_manager: ModelManager = None
@@ -323,9 +326,11 @@ async def download_file(filename: str = Query(..., description="Name of the file
 
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...), target_filename: str = Query(..., description="Target filename in sandbox_files/")):
+async def upload_file(request: Request, file: UploadFile = File(...), target_filename: str = Query(..., description="Target filename in sandbox_files/")):
     """
     Upload a file to workspace/sandbox_files/.
+    Enforces a 20 MB upload size limit via Content-Length pre-check and
+    incremental streaming to prevent disk exhaustion from large uploads.
     """
     # Input validation
     if "\x00" in target_filename:
@@ -340,8 +345,41 @@ async def upload_file(file: UploadFile = File(...), target_filename: str = Query
     if not str(target_path).startswith(str(sandbox_dir.resolve())):
         raise HTTPException(status_code=403, detail="Access denied: path traversal detected")
 
+    # --- Upload size enforcement ---
+    # 1) Fast-reject via Content-Length header (client may lie, so we also
+    #    check during streaming below).
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_size = int(content_length)
+            if declared_size > MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Upload too large: {declared_size} bytes exceeds the {MAX_UPLOAD_SIZE_BYTES} byte limit."
+                )
+        except (ValueError, TypeError):
+            pass  # Malformed header; fall through to streaming check
+
+    # 2) Stream-read in chunks and enforce the limit even if the client
+    #    lied about Content-Length or omitted it entirely.
     try:
-        content = await file.read()
+        chunks = []
+        total_size = 0
+        chunk_size = 1024 * 1024  # 1 MB chunks
+        while True:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+            total_size += len(chunk)
+            if total_size > MAX_UPLOAD_SIZE_BYTES:
+                # Reject immediately — do not write partial data to disk
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Upload too large: exceeds the {MAX_UPLOAD_SIZE_BYTES} byte limit."
+                )
+            chunks.append(chunk)
+
+        content = b"".join(chunks)
         target_path.write_bytes(content)
         logger.info(f"File uploaded: {target_path} ({len(content)} bytes)")
         return {
@@ -349,6 +387,8 @@ async def upload_file(file: UploadFile = File(...), target_filename: str = Query
             "path": f"workspace/sandbox_files/{target_filename}",
             "size": len(content),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
