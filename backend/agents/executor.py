@@ -3,6 +3,7 @@ Executor: Tool dispatcher that executes individual steps from the planner's plan
 Routes each step to the appropriate tool (file_io, llm, code).
 """
 
+import json
 import logging
 from typing import Dict
 
@@ -13,6 +14,9 @@ from backend.tools.doc_generator import generate_doc
 from backend.tools.ppt_generator import generate_ppt
 from backend.tools.spreadsheet_analyzer import read_sheet
 from backend.tools.spreadsheet_generator import generate_sheet
+from backend.tools.pid_extractor import extract_topology
+from backend.tools.handwriting_triage import read_note
+from backend.tools.photo_analyzer import analyze_nameplate
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,12 @@ def execute_step(step: dict, context: dict, model_manager: ModelManager = None) 
         result = _execute_spreadsheet_generator(args)
     elif tool == "spreadsheet_analyzer":
         result = _execute_spreadsheet_analyzer(args)
+    elif tool == "pid_extractor":
+        result = _execute_pid_extractor(args)
+    elif tool == "handwriting_triage":
+        result = _execute_handwriting_triage(args)
+    elif tool == "photo_analyzer":
+        result = _execute_photo_analyzer(args)
     else:
         result = f"Error: Unknown tool '{tool}'"
 
@@ -172,3 +182,24 @@ def _execute_spreadsheet_analyzer(args: list) -> str:
     data = read_sheet(filename, cell_range)
     # Return data as a string representation
     return str(data)
+
+
+def _execute_pid_extractor(args: list) -> str:
+    """Execute the P&ID topology extractor tool."""
+    image_path = args[0] if args else "workspace/sandbox_files/test_pid.png"
+    result = extract_topology(image_path)
+    return json.dumps(result)
+
+
+def _execute_handwriting_triage(args: list) -> str:
+    """Execute the handwriting triage reader tool."""
+    image_path = args[0] if args else "workspace/sandbox_files/test_note.jpg"
+    result = read_note(image_path)
+    return json.dumps(result)
+
+
+def _execute_photo_analyzer(args: list) -> str:
+    """Execute the field photo analyzer tool."""
+    image_path = args[0] if args else "workspace/sandbox_files/test_photo.jpg"
+    result = analyze_nameplate(image_path)
+    return json.dumps(result)

@@ -105,6 +105,44 @@ def query_total_vram_gb() -> Optional[float]:
 MOCK_PREFIX = "[MockLLM] "
 
 
+class MockVisionModel:
+    """
+    Deterministic mock vision model for testing without real VL weights.
+    Returns hardcoded OCR text based on the prompt content.
+    """
+
+    def analyze_image(self, image_path: str, prompt: str) -> str:
+        """
+        Analyze an image with a text prompt. Returns deterministic fake OCR text.
+
+        Args:
+            image_path: Path to the image file.
+            prompt: The analysis prompt.
+
+        Returns:
+            A string with the (mock) analysis result.
+        """
+        lower = prompt.lower()
+
+        # P&ID topology extraction
+        if any(kw in lower for kw in ["topology", "p&id", "pid", "equipment tag"]):
+            return json.dumps({
+                "nodes": [{"id": "V-101", "type": "valve"}],
+                "edges": [{"from": "V-101", "to": "P-101"}]
+            })
+
+        # Handwriting transcription
+        if "handwriting" in lower or "transcribe" in lower:
+            return "Mock handwritten text: Pressure 5bar, Temperature 120C, Flow rate OK"
+
+        # Nameplate / photo analysis
+        if any(kw in lower for kw in ["nameplate", "photo", "model", "serial"]):
+            return "Model: X-200, Serial: 12345, Manufacturer: Acme Corp, Type: Centrifugal Pump"
+
+        # Generic fallback
+        return f"MockVisionModel analysis of {Path(image_path).name}: {prompt[:100]}"
+
+
 class MockLLM:
     """
     Deterministic mock LLM for testing without model weights.
@@ -197,6 +235,30 @@ class MockLLM:
             plan = [
                 {"tool": "spreadsheet_generator", "action": "generate",
                  "args": [fname, data]}
+            ]
+            return self._wrap_plan(plan)
+
+        # P&ID / topology extraction
+        if any(kw in lower for kw in ["p&pid", "topology", "pid extractor", "extract topology"]):
+            plan = [
+                {"tool": "pid_extractor", "action": "extract",
+                 "args": ["workspace/sandbox_files/test_pid.png"]}
+            ]
+            return self._wrap_plan(plan)
+
+        # Handwriting triage
+        if any(kw in lower for kw in ["handwriting", "handwritten", "read note", "field note"]):
+            plan = [
+                {"tool": "handwriting_triage", "action": "read",
+                 "args": ["workspace/sandbox_files/test_note.jpg"]}
+            ]
+            return self._wrap_plan(plan)
+
+        # Photo / nameplate analysis
+        if any(kw in lower for kw in ["photo", "nameplate", "field photo", "equipment photo"]):
+            plan = [
+                {"tool": "photo_analyzer", "action": "analyze",
+                 "args": ["workspace/sandbox_files/test_photo.jpg"]}
             ]
             return self._wrap_plan(plan)
 

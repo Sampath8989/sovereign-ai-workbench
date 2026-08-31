@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -320,6 +320,38 @@ async def download_file(filename: str = Query(..., description="Name of the file
         filename=filename,
         media_type=media_type,
     )
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...), target_filename: str = Query(..., description="Target filename in sandbox_files/")):
+    """
+    Upload a file to workspace/sandbox_files/.
+    """
+    # Input validation
+    if "\x00" in target_filename:
+        raise HTTPException(status_code=403, detail="Filename contains invalid characters")
+
+    sandbox_dir = Path(__file__).parent.parent / "workspace" / "sandbox_files"
+    sandbox_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path = (sandbox_dir / target_filename).resolve()
+
+    # Containment check
+    if not str(target_path).startswith(str(sandbox_dir.resolve())):
+        raise HTTPException(status_code=403, detail="Access denied: path traversal detected")
+
+    try:
+        content = await file.read()
+        target_path.write_bytes(content)
+        logger.info(f"File uploaded: {target_path} ({len(content)} bytes)")
+        return {
+            "status": "File uploaded",
+            "path": f"workspace/sandbox_files/{target_filename}",
+            "size": len(content),
+        }
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/audit/log")
