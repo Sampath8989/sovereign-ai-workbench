@@ -191,24 +191,44 @@ class MockLLM:
 
     @staticmethod
     def _check_grounding(text: str) -> bool:
-        """Simple heuristic: extract the generated-text section and source-text
-        section from the verifier prompt, and check whether key tokens from the
-        sources appear in the generated text."""
-        # Find 'Generated text:' and 'Sources:' markers
+        """Heuristic for MockLLM: extract the generated-text section and source-text
+        section from the verifier prompt, and check whether:
+        1. Specific numbers, quantities, or metrics in generated text actually appear in sources.
+        2. Key content tokens in generated text are grounded in sources."""
         gen_start = text.lower().find('generated text:')
         src_start = text.lower().find('sources:')
         if gen_start < 0 or src_start < 0:
             return False
         generated = text[gen_start:src_start].lower()
         sources = text[src_start:].lower()
-        # Extract meaningful tokens from sources (skip common words)
-        stop = {'the', 'a', 'an', 'is', 'are', 'was', 'in', 'or', 'from', 'and', 'of', 'for', 'to', 'if', 'be', 'not'}
-        source_tokens = {w for w in re.split(r'\W+', sources) if len(w) > 2 and w not in stop}
-        if not source_tokens:
+
+        # Check numerical / metric contradictions:
+        # Extract all numbers/metrics from generated text
+        gen_numbers = set(re.findall(r'\b\d+(?:\.\d+)?(?:mm|cm|m|km|psi|bar|kg|g|%|c|f)?\b', generated))
+        src_numbers = set(re.findall(r'\b\d+(?:\.\d+)?(?:mm|cm|m|km|psi|bar|kg|g|%|c|f)?\b', sources))
+
+        # If generated text contains specific numbers/metrics not in sources -> NOT grounded
+        if gen_numbers and not gen_numbers.issubset(src_numbers):
             return False
-        # Check overlap
-        overlap = sum(1 for t in source_tokens if t in generated)
-        return overlap >= 2  # at least 2 meaningful tokens match
+
+        # Extract meaningful tokens from sources and generated text (skip common words)
+        stop = {
+            'the', 'a', 'an', 'is', 'are', 'was', 'were', 'in', 'or', 'from',
+            'and', 'of', 'for', 'to', 'if', 'be', 'been', 'not', 'this', 'that',
+            'these', 'those', 'it', 'its', 'as', 'by', 'at', 'on', 'with',
+            'generated', 'text', 'sources', 'user', 'request', 'what', 'how'
+        }
+        gen_tokens = {w for w in re.split(r'\W+', generated) if len(w) > 2 and w not in stop}
+        src_tokens = {w for w in re.split(r'\W+', sources) if len(w) > 2 and w not in stop}
+
+        if not gen_tokens or not src_tokens:
+            return False
+
+        # Check what percentage of generated content tokens exist in sources
+        overlap = len(gen_tokens & src_tokens)
+        grounded_ratio = overlap / len(gen_tokens)
+
+        return grounded_ratio >= 0.7  # at least 70% of generated content tokens must be in sources
 
     @staticmethod
     def _extract_sources(text: str) -> str:

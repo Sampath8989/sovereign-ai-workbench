@@ -418,8 +418,12 @@ try:
     sources = [{"text": "The maximum allowable corrosion limit is 5mm for vessels.", "metadata": {"source": "sop-44.txt"}}]
     
     v_res = verifier.verify(gen_text, sources)
-    record(21, "CoT Verifier", "Contradictory claim verification (50mm vs 5mm)", "PASS",
-           f"Verifier verdict: grounded={v_res.get('grounded')}, reason='{v_res.get('reason')}'")
+    if v_res.get("grounded") is False:
+        record(21, "CoT Verifier", "Contradictory claim verification (50mm vs 5mm)", "PASS",
+               f"Contradiction caught: grounded={v_res.get('grounded')}, reason='{v_res.get('reason')}'")
+    else:
+        record(21, "CoT Verifier", "Contradictory claim verification (50mm vs 5mm)", "FAIL",
+               f"Contradiction missed: grounded={v_res.get('grounded')}, reason='{v_res.get('reason')}'")
 except Exception as e:
     record(21, "CoT Verifier", "Contradictory claim verification", "FAIL", f"Exception: {e}")
 
