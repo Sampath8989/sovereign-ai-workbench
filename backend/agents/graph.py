@@ -1,6 +1,6 @@
 """
 LangGraph State Machine: Orchestrates the ReWOO agent pipeline.
-Pipeline: START → plan_node → execute_node → synthesize_node → END
+Pipeline: START → plan_node → execute_node → retrieve_node → synthesize_node → END
 """
 
 import logging
@@ -11,6 +11,9 @@ from langgraph.graph import END, START, StateGraph
 from backend.core.model_manager import ModelManager
 from backend.agents.planner import generate_plan
 from backend.agents.executor import execute_step
+from backend.tools.rag_search import get_rag
+from backend.tools.citation_tagger import tag_citations
+from backend.agents.verifier import CitationVerifier
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,8 @@ class AgentState(TypedDict):
     plan: list
     context: dict
     output: str
+    retrieved_sources: list
+    verification: dict
 
 
 def plan_node(state: AgentState) -> dict:
@@ -61,13 +66,36 @@ def execute_node(state: AgentState) -> dict:
     return {"context": context}
 
 
+def retrieve_node(state: AgentState) -> dict:
+    """
+    Retrieve relevant documents from the knowledge base.
+    """
+    logger.info(f"retrieve_node: Searching KB for: {state['input'][:100]}")
+    
+    try:
+        rag = get_rag()
+        sources = rag.search(state["input"], top_k=3)
+        logger.info(f"retrieve_node: Found {len(sources)} sources")
+        
+        # Update context with retrieved sources
+        context = dict(state.get("context", {}))
+        context["retrieved_sources"] = sources
+        
+        return {"context": context, "retrieved_sources": sources}
+    except Exception as e:
+        logger.error(f"retrieve_node: RAG search failed: {e}")
+        return {"context": state.get("context", {}), "retrieved_sources": []}
+
+
 def synthesize_node(state: AgentState) -> dict:
     """
-    Take the accumulated context and produce a natural language answer.
+    Take the accumulated context and retrieved sources, generate answer,
+    tag citations, and verify grounding.
     """
     logger.info("synthesize_node: Generating final answer")
 
     context = state.get("context", {})
+    retrieved_sources = state.get("retrieved_sources", [])
 
     # Compile context into a readable summary
     context_text = "\n".join(
@@ -76,6 +104,13 @@ def synthesize_node(state: AgentState) -> dict:
 
     if not context_text.strip():
         context_text = "No results from previous steps."
+
+    # Build source context for grounding
+    source_context = ""
+    if retrieved_sources:
+        source_context = "\n\nRetrieved sources:\n" + "\n".join(
+            f"[{i+1}] {s.get('text', '')}" for i, s in enumerate(retrieved_sources)
+        )
 
     model_manager = _get_model_manager()
     from backend.config import get_coder_model
@@ -86,18 +121,73 @@ def synthesize_node(state: AgentState) -> dict:
             "role": "system",
             "content": (
                 "You are a helpful assistant. Based on the execution context below, "
-                "provide a clear, concise answer to the user's original request."
+                "provide a clear, concise answer to the user's original request. "
+                "Use the retrieved sources to ground your answer when available."
             ),
         },
         {
             "role": "user",
-            "content": f"User request: {state['input']}\n\nExecution results:\n{context_text}",
+            "content": f"User request: {state['input']}\n\nExecution results:\n{context_text}{source_context}",
         },
     ]
 
-    output = model_manager.generate_from_messages(model_name, messages)
-    logger.info(f"synthesize_node: Output: {output[:200]}")
-    return {"output": output}
+    raw_output = model_manager.generate_from_messages(model_name, messages)
+    logger.info(f"synthesize_node: Raw output: {raw_output[:200]}")
+
+    # If the output is raw MockLLM plan JSON, construct a user-friendly message
+    output = _humanize_output(raw_output, context, state.get("input", ""))
+
+    # Tag citations
+    if retrieved_sources:
+        output = tag_citations(output, retrieved_sources)
+        logger.info(f"synthesize_node: Tagged citations in output")
+
+    # Verify grounding
+    verifier = CitationVerifier(model_manager)
+    verification = verifier.verify(output, retrieved_sources)
+    logger.info(f"synthesize_node: Verification: {verification}")
+
+    if not verification.get("grounded", False):
+        output += f"\n\n[Warning: {verification.get('reason', 'Claims may not be fully grounded in sources.')}]"
+
+    return {"output": output, "verification": verification}
+
+
+def _humanize_output(raw_output: str, context: dict, user_input: str) -> str:
+    """
+    Detect raw plan JSON in the output and replace with a human-readable message
+    referencing actual file paths produced by the executor.
+    """
+    # Check if output looks like MockLLM plan JSON
+    if raw_output.startswith('{"mock":') or raw_output.startswith('[{"tool":'):
+        # Collect file paths from executor results
+        file_paths = []
+        for k, v in sorted(context.items()):
+            if k.endswith("_result") and isinstance(v, str) and ("/" in v or "\\" in v):
+                # Looks like a file path
+                from pathlib import Path as _P
+                try:
+                    p = _P(v)
+                    if p.suffix in ('.docx', '.pptx', '.xlsx', '.pdf', '.txt', '.csv'):
+                        file_paths.append(v)
+                except Exception:
+                    pass
+
+        if file_paths:
+            paths_str = ", ".join(file_paths)
+            return f"Deliverables generated successfully: {paths_str}"
+
+        # Check context for tool results that contain file paths
+        tool_results = [v for k, v in sorted(context.items()) if k.endswith("_result") and isinstance(v, str)]
+        if tool_results:
+            # Use the last meaningful result
+            last_result = tool_results[-1]
+            if len(last_result) > 5 and not last_result.startswith("Error"):
+                return f"Task completed. Result: {last_result}"
+
+        return "Task completed successfully."
+
+    return raw_output
 
 
 def build_graph():
@@ -112,12 +202,14 @@ def build_graph():
     # Add nodes
     graph.add_node("plan_node", plan_node)
     graph.add_node("execute_node", execute_node)
+    graph.add_node("retrieve_node", retrieve_node)
     graph.add_node("synthesize_node", synthesize_node)
 
     # Add edges
     graph.add_edge(START, "plan_node")
     graph.add_edge("plan_node", "execute_node")
-    graph.add_edge("execute_node", "synthesize_node")
+    graph.add_edge("execute_node", "retrieve_node")
+    graph.add_edge("retrieve_node", "synthesize_node")
     graph.add_edge("synthesize_node", END)
 
     # Compile

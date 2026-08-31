@@ -12,6 +12,7 @@ import re
 import subprocess
 import time
 import logging
+import uuid
 from collections import OrderedDict
 from typing import Dict, List, Optional, Union
 
@@ -154,6 +155,69 @@ class MockLLM:
             text = str(messages)
 
         lower = text.lower()
+
+        # --- Deliverable synthesis tool triggers ---
+        # Word document generation
+        if any(kw in lower for kw in ["word document", "approval note", "docx"]):
+            uid = uuid.uuid4().hex[:8]
+            plan = [
+                {"tool": "doc_generator", "action": "generate",
+                 "args": [f"approval_{uid}.docx", "Approval Note", "This is safe."]}
+            ]
+            return self._wrap_plan(plan)
+
+        # PowerPoint / slides generation
+        if any(kw in lower for kw in ["powerpoint", "slides", "pptx"]):
+            uid = uuid.uuid4().hex[:8]
+            plan = [
+                {"tool": "ppt_generator", "action": "generate",
+                 "args": [f"slides_{uid}.pptx", "Presentation", ["Slide 1", "Slide 2"]]}
+            ]
+            return self._wrap_plan(plan)
+
+        # Spreadsheet generation
+        if any(kw in lower for kw in ["spreadsheet", "xlsx", "excel"]):
+            # Try to extract data from the prompt
+            data_match = re.search(r"data\s*(?:=|:\s*)\s*(\[\[.*?\]\])", text, re.DOTALL)
+            data = [["Name", "Value"], ["Item", "1"]]
+            if data_match:
+                try:
+                    data = __import__("json").loads(data_match.group(1))
+                except Exception:
+                    pass
+
+            # Try to extract filename, fall back to unique name
+            fname_match = re.search(r"named?\s+(\S+\.xlsx)", lower)
+            if fname_match:
+                fname = fname_match.group(1)
+            else:
+                uid = uuid.uuid4().hex[:8]
+                fname = f"data_{uid}.xlsx"
+
+            plan = [
+                {"tool": "spreadsheet_generator", "action": "generate",
+                 "args": [fname, data]}
+            ]
+            return self._wrap_plan(plan)
+
+        # Calculator / math
+        if any(kw in lower for kw in ["calculate", "solve", "math", "equation"]):
+            # Extract the expression from the prompt
+            expr = "x + 5 = 10"  # default
+            eq_match = re.search(r'(?:solve|calculate|compute|math)[:\s]+(.+)', lower)
+            if eq_match:
+                expr = eq_match.group(1).strip()
+            else:
+                # Try to find an equation-like pattern in the full text
+                eq_match = re.search(r'([a-z0-9\s\+\-\*/\^\=\.]+(?:=\s*[a-z0-9\s\+\-\*/\^\.]+)?)', text)
+                if eq_match:
+                    expr = eq_match.group(1).strip()
+
+            plan = [
+                {"tool": "calculator", "action": "solve",
+                 "args": [expr]}
+            ]
+            return self._wrap_plan(plan)
 
         # If asked for a JSON plan, return a hardcoded plan with mock indicator
         # Use word-boundary matching to avoid false positives (e.g., 'plan' in 'explanation')
