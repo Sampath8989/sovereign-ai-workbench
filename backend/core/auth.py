@@ -39,7 +39,8 @@ def get_role(role: str = Query("engineer", description="User role: 'engineer' or
         HTTPException 400 if the role is not recognised.
     """
     from fastapi import HTTPException
-    role = (role or "engineer").lower().strip()
+    # Strip null bytes and whitespace — treat as opaque string
+    role = (role or "engineer").replace("\x00", "").lower().strip()
     if role not in VALID_ROLES:
         raise HTTPException(
             status_code=400,

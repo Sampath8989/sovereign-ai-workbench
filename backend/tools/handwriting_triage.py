@@ -78,15 +78,23 @@ def read_note(image_path: str) -> dict:
     # Mock confidence: derived from image file bytes (not mock text length)
     # so different images produce different, deterministic confidence values.
     # This is MOCK/DEMO behavior only — not calibrated model confidence.
+    # Fail-safe: if confidence is None or missing, default to 0.0 (triggers warning).
     if text and text != "No text detected":
-        confidence = vision.get_mock_confidence(image_path)
+        try:
+            confidence = vision.get_mock_confidence(image_path)
+        except Exception:
+            confidence = 0.0
     else:
+        confidence = 0.0
+
+    # Ensure confidence is a valid float (fail-safe: None -> 0.0 triggers warning)
+    if confidence is None or not isinstance(confidence, (int, float)):
         confidence = 0.0
 
     # Low confidence warning: if below 0.6, prepend a human-review notice
     display_text = text
     if confidence < 0.6 and text and text != "No text detected":
-        display_text = f"⚠️ LOW CONFIDENCE - HUMAN REVIEW REQUIRED: {text}"
+        display_text = f"\u26a0\ufe0f LOW CONFIDENCE - HUMAN REVIEW REQUIRED: {text}"
         logger.warning(f"Handwriting confidence {confidence:.3f} below 0.6 threshold")
 
     result = {
