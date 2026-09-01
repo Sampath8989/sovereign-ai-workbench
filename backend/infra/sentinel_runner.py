@@ -235,6 +235,11 @@ class SovereignSentinel:
         for ip in self.allow_list:
             self._add_allow_rule(ip)
 
+        # Reset breach count for this monitoring session
+        # so the counter starts clean on each server startup
+        self._breach_count = 0
+        self._seen_connections = set()
+
         self._monitoring = True
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
@@ -403,10 +408,18 @@ class SovereignSentinel:
         except (socket.timeout, ConnectionRefusedError, OSError) as e:
             result = {"status": "blocked", "error": str(e), "target": "8.8.8.8:53"}
 
-        # Log the test
+        # Log the intentional test event clearly in audit log
         self.audit.log_event(
             "SYNTHETIC_LEAK_TEST",
-            {"target": "8.8.8.8:53", "result": result["status"], "error": result.get("error")},
+            {
+                "event_type": "SYNTHETIC_LEAK_TEST",
+                "action": "synthetic_leak_test",
+                "is_synthetic_test": True,
+                "label": "Intentional Sovereignty Test (UI Button)",
+                "target": "8.8.8.8:53",
+                "result": result["status"],
+                "error": result.get("error"),
+            },
         )
 
         # Record breach for this process
