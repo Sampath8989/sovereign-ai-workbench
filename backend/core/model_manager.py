@@ -329,8 +329,18 @@ class MockLLM:
             )
 
         # --- Deliverable synthesis tool triggers ---
+        # PDF requests -> map to Word document generator (.docx) with clear note that PDF is not directly supported
+        if any(kw in lower for kw in ["pdf", "pdf document", "pdf report", ".pdf"]):
+            uid = uuid.uuid4().hex[:8]
+            plan = [
+                {"tool": "doc_generator", "action": "generate",
+                 "args": [f"report_{uid}.docx", "Project Report (Word Document)",
+                          "Note: Direct PDF export is not currently supported in the Workbench. This document has been generated in Word (.docx) format instead."]}
+            ]
+            return self._wrap_plan(plan)
+
         # Word document generation
-        if any(kw in lower for kw in ["word document", "approval note", "docx"]):
+        if any(kw in lower for kw in ["word document", "word doc", "approval note", "docx", "status report", "project report"]):
             uid = uuid.uuid4().hex[:8]
             plan = [
                 {"tool": "doc_generator", "action": "generate",

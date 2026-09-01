@@ -4,7 +4,7 @@ const API_BASE = '/api'
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 60000, // 60s for LLM inference
+  timeout: 120000, // 120s for local multi-step LLM inference
   headers: { 'Content-Type': 'application/json' },
 })
 
