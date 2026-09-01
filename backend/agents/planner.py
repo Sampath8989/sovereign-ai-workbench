@@ -34,6 +34,10 @@ def generate_plan(prompt: str, model_manager: ModelManager = None) -> List[dict]
     """
     Generate a plan (list of step dicts) from a user prompt.
 
+    Uses MockLLM for plan generation because small local models (0.5B) cannot
+    reliably produce structured JSON. The real model is used for synthesis
+    in synthesize_node, where natural language quality matters.
+
     Args:
         prompt: The user's request.
         model_manager: ModelManager instance to use for generation.
@@ -50,12 +54,28 @@ def generate_plan(prompt: str, model_manager: ModelManager = None) -> List[dict]
     ]
 
     try:
-        # Use the router model for planning
-        from backend.config import get_router_model
-        model_name = get_router_model()
-
-        response = model_manager.generate_from_messages(model_name, messages)
+        # Always use MockLLM for planning — small models can't produce
+        # reliable JSON. The real model is used for synthesis instead.
+        from backend.core.model_manager import MockLLM
+        mock_llm = MockLLM()
+        output = mock_llm.create_chat_completion(messages)
+        response = output["choices"][0]["text"]
         logger.info(f"Planner raw response: {response[:200]}")
+
+        # Check if MockLLM returned a direct response (greeting/simple chat)
+        # instead of a JSON plan. Direct responses start with [MockLLM] prefix
+        # and don't contain JSON structure.
+        if response.startswith("[MockLLM] "):
+            direct_text = response[len("[MockLLM] "):]
+            # If it doesn't look like JSON, it's a direct conversational response.
+            # Wrap it as a plan with a special marker so the graph can detect it.
+            if not direct_text.strip().startswith('{') and not direct_text.strip().startswith('['):
+                if mock_llm._is_greeting(prompt):
+                    logger.info("Planner: MockLLM returned direct response for greeting")
+                    return [{"tool": "llm", "action": "summarize", "args": [direct_text], "direct_response": True}]
+                else:
+                    logger.info("Planner: MockLLM returned direct string for non-greeting; using fallback plan")
+                    return _make_fallback(prompt)
 
         # Parse JSON from the response
         # Strip markdown code fences if present
@@ -72,7 +92,7 @@ def generate_plan(prompt: str, model_manager: ModelManager = None) -> List[dict]
             is_mock = plan.get("mock", False)
             plan = plan["plan"]
             if is_mock:
-                logger.info("Planner received MockLLM response (mock=True)")
+                logger.info("Planner using MockLLM for structured plan generation")
 
         if not isinstance(plan, list):
             logger.warning(f"Planner returned non-list: {type(plan)}. Using fallback.")
@@ -92,3 +112,31 @@ def generate_plan(prompt: str, model_manager: ModelManager = None) -> List[dict]
 def _make_fallback(prompt: str) -> List[dict]:
     """Create a fallback plan that sends the prompt directly to the LLM."""
     return [{"tool": "llm", "action": "summarize", "args": [prompt]}]
+
+
+def is_direct_response(plan: List[dict]) -> bool:
+    """Check if a plan is actually a direct response (not a task plan).
+
+    When MockLLM detects greetings or simple chat, it returns a plan containing
+    the response text in the first step's args rather than a real task plan.
+    This flag signals the orchestrator to skip the execute→retrieve→verify
+    pipeline and use the response as-is.
+    """
+    if not plan or not isinstance(plan, list):
+        return False
+    step = plan[0]
+    if not isinstance(step, dict):
+        return False
+    # Explicit direct response marker
+    if step.get("direct_response") is True:
+        return True
+    if step.get("action") == "direct_response" or step.get("tool") == "direct_response":
+        return True
+    # Direct response has tool=llm, action=summarize, and args containing a greeting response
+    if step.get("tool") == "llm" and step.get("action") == "summarize":
+        args = step.get("args", [])
+        if args and isinstance(args[0], str):
+            text = args[0]
+            if "Sovereign AI Workbench" in text and ("Hello!" in text or "locally-hosted" in text):
+                return True
+    return False

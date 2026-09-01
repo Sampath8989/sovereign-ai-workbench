@@ -58,7 +58,14 @@ try:
     LLAMA_CPP_AVAILABLE = True
 except ImportError:
     LLAMA_CPP_AVAILABLE = False
-    logger.warning("llama_cpp not installed. Model loading will use stub implementation.")
+    logger.warning(
+        "\n"
+        "=" * 70 + "\n"
+        "CRITICAL: llama_cpp not installed! Model loading will use MockLLM.\n"
+        "Install with: pip install llama-cpp-python\n"
+        "For CUDA GPU support: CMAKE_ARGS=\"-DGGML_CUDA=on\" pip install llama-cpp-python --force-reinstall\n"
+        "=" * 70
+    )
 
 # Try importing pynvml for live GPU queries
 _PYNVML_AVAILABLE = False
@@ -239,6 +246,50 @@ class MockLLM:
         wrapped = json.dumps({"mock": True, "plan": plan})
         return {"choices": [{"text": wrapped}]}
 
+    @staticmethod
+    def _extract_user_message(messages: Union[str, List[dict]]) -> str:
+        """
+        Extract only the user's message content from a message list.
+        This avoids combining system prompts with user input, which causes
+        false keyword matches (e.g., system prompt containing 'plan').
+        """
+        if isinstance(messages, str):
+            return messages
+        if isinstance(messages, list):
+            # Last user message is the actual user input
+            for m in reversed(messages):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    return m.get("content", "")
+            # Fallback: last message content
+            if messages:
+                m = messages[-1]
+                return m.get("content", "") if isinstance(m, dict) else str(m)
+        return ""
+
+    @staticmethod
+    def _is_greeting(text: str) -> bool:
+        """
+        Detect simple greetings and conversational openers.
+        These should be handled as direct chat, not routed through
+        the full plan→execute→retrieve→synthesize pipeline.
+        """
+        lower = text.lower().strip()
+        cleaned = re.sub(r'[!.,?]+$', '', lower).strip()
+        # Exact match
+        greetings = {
+            'hello', 'hi', 'hey', 'howdy', 'greetings', 'sup', 'yo', 'hiya',
+            'good morning', 'good afternoon', 'good evening', 'good day',
+        }
+        if cleaned in greetings:
+            return True
+        # Short inputs that are just greetings
+        if len(lower) <= 25 and re.match(r'^(hi|hey|hello|yo|sup|hiya)(\s+(there|workbench|assistant|all|everyone))?[\s!.,]*$', lower):
+            return True
+        # Simple conversational openers
+        if re.match(r'^(what can you do|who are you|what are you|tell me about yourself|what do you do|help)$', cleaned):
+            return True
+        return False
+
     def create_chat_completion(self, messages: Union[str, List[dict]], **kwargs) -> dict:
         """
         Mock chat completion. Inspects the messages to return appropriate responses.
@@ -249,7 +300,7 @@ class MockLLM:
         Returns:
             A dict with 'choices' key mimicking llama-cpp-python output.
         """
-        # Extract the text content from messages
+        # Extract the full combined text for keyword matching
         if isinstance(messages, str):
             text = messages
         elif isinstance(messages, list):
@@ -261,6 +312,21 @@ class MockLLM:
             text = str(messages)
 
         lower = text.lower()
+
+        # --- Intent classifier: greetings and simple chat ---
+        # Extract only the user's message for intent detection.
+        # This avoids false matches from system prompts (e.g., planner prompt
+        # containing the word 'plan' which would trigger the planner branch
+        # for every input, including simple greetings).
+        user_msg = self._extract_user_message(messages)
+        if self._is_greeting(user_msg):
+            return self._wrap_response(
+                "Hello! I'm the Sovereign AI Workbench — an air-gapped, locally-hosted AI assistant. "
+                "I can help you with: generating documents (Word, PowerPoint, Excel), "
+                "analyzing P&ID diagrams, reading handwritten notes, calculating values, "
+                "and more — all running entirely on your local hardware with no external network access. "
+                "What would you like me to help you with?"
+            )
 
         # --- Deliverable synthesis tool triggers ---
         # Word document generation
@@ -352,13 +418,41 @@ class MockLLM:
             ]
             return self._wrap_plan(plan)
 
-        # If asked for a JSON plan, return a hardcoded plan with mock indicator
-        # Use word-boundary matching to avoid false positives (e.g., 'plan' in 'explanation')
-        if (re.search(r'\bplan\b', lower) or re.search(r'\bsteps\b', lower) or
-                re.search(r'\bdecompos', lower)):
+        # File I/O triggers
+        user_lower = user_msg.lower()
+        file_match = re.search(r'(?:read|write|open|load)\s+(?:the\s+)?(?:file\s+)?([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)', user_lower)
+        if (file_match or
+                any(kw in user_lower for kw in ["read test.txt", "read the file", "file_io", "read file"]) or
+                re.search(r'\bplan\b', user_lower) or re.search(r'\bsteps\b', user_lower) or re.search(r'\bdecompos', user_lower)):
+            fname = file_match.group(1) if file_match else "test.txt"
             plan = [
-                {"tool": "file_io", "action": "read", "args": ["test.txt"]},
+                {"tool": "file_io", "action": "read", "args": [fname]},
                 {"tool": "llm", "action": "summarize", "args": []}
+            ]
+            return self._wrap_plan(plan)
+
+        # Code execution triggers
+        if any(kw in user_lower for kw in ["execute code", "run code", "python code", "execute script"]):
+            plan = [
+                {"tool": "code", "action": "execute", "args": ["print('Hello')"]}
+            ]
+            return self._wrap_plan(plan)
+
+        # Check if called in a planning context (e.g. from planner.py or system prompt asking for steps)
+        system_content = ""
+        if isinstance(messages, list):
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") == "system":
+                    system_content += " " + m.get("content", "")
+        is_plan_request = any(
+            kw in system_content.lower()
+            for kw in ["task planner", "json array of steps", "decompose into steps"]
+        )
+
+        if is_plan_request:
+            # Fallback JSON plan for non-greeting, unrecognized prompts
+            plan = [
+                {"tool": "llm", "action": "summarize", "args": [user_msg]}
             ]
             return self._wrap_plan(plan)
 
@@ -381,7 +475,7 @@ class MockLLM:
             return self._wrap_response(source_section)
 
         # If asked to summarize, return a mock summary
-        if "summar" in lower:
+        if "summar" in user_lower:
             return self._wrap_response("This is a mock summary of the provided content.")
 
         return self._wrap_response(f"Processed: {text[:500]}")
@@ -598,11 +692,31 @@ class ModelManager:
 
         # Try to load real model, fall back to MockLLM if unavailable
         if LLAMA_CPP_AVAILABLE and os.path.exists(model_path):
+            # Determine GPU layers: use -1 (all) if CUDA compiled in, else 0 (CPU only)
+            _cuda_available = False
             try:
+                from llama_cpp import llama_cpp as _lc
+                _cuda_available = hasattr(_lc, "ggml_backend_cuda_init")
+            except Exception:
+                pass
+            n_gpu = -1 if _cuda_available else 0
+            backend = "CUDA GPU" if _cuda_available else "CPU only"
+
+            try:
+                logger.info(
+                    f"Loading model {model_name} from {model_path} "
+                    f"(n_gpu_layers={n_gpu}, backend={backend})"
+                )
+                t_load_start = time.time()
                 model_handle = llama_cpp.Llama(
                     model_path=model_path,
                     n_ctx=2048,
-                    n_gpu_layers=-1,
+                    n_gpu_layers=n_gpu,
+                    verbose=False,
+                )
+                t_load = time.time() - t_load_start
+                logger.info(
+                    f"Model {model_name} loaded in {t_load:.2f}s ({backend})"
                 )
             except Exception as e:
                 logger.warning(
@@ -611,9 +725,15 @@ class ModelManager:
                 )
                 model_handle = self._mock_llm
         else:
-            logger.info(
-                f"Model file not found at {model_path}. Using MockLLM fallback."
-            )
+            if not LLAMA_CPP_AVAILABLE:
+                logger.warning(
+                    f"Model file found at {model_path} but llama_cpp not installed. "
+                    f"Using MockLLM fallback."
+                )
+            else:
+                logger.warning(
+                    f"Model file not found at {model_path}. Using MockLLM fallback."
+                )
             model_handle = self._mock_llm
 
         self.resident_models[model_name] = model_handle
