@@ -37,6 +37,8 @@ class AgentState(TypedDict):
     retrieved_sources: list
     verification: dict
     role: str
+    model_used: str
+    deliverables: list
 
 
 def plan_node(state: AgentState) -> dict:
@@ -177,6 +179,24 @@ def synthesize_node(state: AgentState) -> dict:
         output = tag_citations(output, retrieved_sources)
         logger.info(f"synthesize_node: Tagged citations in output")
 
+    # Extract deliverables from context
+    deliverables = []
+    for k, v in sorted(context.items()):
+        if k.endswith("_result") and isinstance(v, str):
+            from pathlib import Path as _P
+            try:
+                p = _P(v)
+                if p.suffix.lower() in ('.docx', '.pptx', '.xlsx', '.pdf', '.txt', '.csv'):
+                    if p.name not in deliverables:
+                        deliverables.append(p.name)
+            except Exception:
+                pass
+
+    if deliverables:
+        for d in deliverables:
+            if d not in output:
+                output += f"\n\nDeliverable generated: {d}"
+
     # Verify grounding
     verifier = CitationVerifier(model_manager)
     verification = verifier.verify(output, retrieved_sources)
@@ -185,7 +205,7 @@ def synthesize_node(state: AgentState) -> dict:
     if not verification.get("grounded", False):
         output += f"\n\n[Warning: {verification.get('reason', 'Claims may not be fully grounded in sources.')}]"
 
-    return {"output": output, "model_used": model_used, "verification": verification}
+    return {"output": output, "model_used": model_used, "verification": verification, "deliverables": deliverables}
 
 
 def _humanize_output(raw_output: str, context: dict, user_input: str) -> str:

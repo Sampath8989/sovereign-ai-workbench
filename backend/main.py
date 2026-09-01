@@ -178,7 +178,24 @@ async def chat_endpoint(req: ChatRequest, role: str = Depends(get_role)):
 
         from backend.config import get_coder_model
         model_used = result.get("model_used", get_coder_model())
-        return {"response": result.get("output", ""), "model_used": model_used, "trace": trace}
+        deliverables = list(result.get("deliverables") or [])
+        for k, v in sorted(context.items()):
+            if k.endswith("_result") and isinstance(v, str):
+                from pathlib import Path as _P
+                try:
+                    p = _P(v)
+                    if p.suffix.lower() in ('.docx', '.pptx', '.xlsx', '.pdf', '.txt', '.csv'):
+                        if p.name not in deliverables:
+                            deliverables.append(p.name)
+                except Exception:
+                    pass
+
+        return {
+            "response": result.get("output", ""),
+            "model_used": model_used,
+            "trace": trace,
+            "deliverables": deliverables,
+        }
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -2,7 +2,8 @@ import { Download, FileText, FileSpreadsheet, Presentation } from 'lucide-react'
 import { getDownloadUrl } from '../hooks/useApi'
 
 interface Props {
-  response: string
+  response?: string
+  deliverables?: string[]
 }
 
 interface Deliverable {
@@ -10,26 +11,40 @@ interface Deliverable {
   type: 'docx' | 'xlsx' | 'pptx' | 'other'
 }
 
-function extractDeliverables(text: string): Deliverable[] {
-  const files: Deliverable[] = []
-  const patterns = [
-    /[\w/.-]+\.(docx|xlsx|pptx)/gi,
-    /outputs\/([\w.-]+\.(docx|xlsx|pptx))/gi,
-  ]
-
+function extractDeliverables(text?: string, explicit?: string[]): Deliverable[] {
   const seen = new Set<string>()
-  for (const pattern of patterns) {
-    let match
-    while ((match = pattern.exec(text)) !== null) {
-      const filename = match[0].split('/').pop() || match[0]
-      if (seen.has(filename)) continue
-      seen.add(filename)
+  const files: Deliverable[] = []
 
-      const ext = filename.split('.').pop()?.toLowerCase() || ''
-      files.push({
-        filename,
-        type: ext as Deliverable['type'],
-      })
+  // Add explicit deliverables
+  if (explicit) {
+    for (const fn of explicit) {
+      if (fn && !seen.has(fn)) {
+        seen.add(fn)
+        const ext = fn.split('.').pop()?.toLowerCase() || ''
+        files.push({ filename: fn, type: (['docx', 'xlsx', 'pptx'].includes(ext) ? ext : 'other') as Deliverable['type'] })
+      }
+    }
+  }
+
+  // Add regex matches from text
+  if (text) {
+    const patterns = [
+      /[\w/.-]+\.(docx|xlsx|pptx)/gi,
+      /outputs\/([\w.-]+\.(docx|xlsx|pptx))/gi,
+    ]
+    for (const pattern of patterns) {
+      let match
+      while ((match = pattern.exec(text)) !== null) {
+        const filename = match[0].split('/').pop() || match[0]
+        if (filename.startsWith('...') || seen.has(filename)) continue
+        seen.add(filename)
+
+        const ext = filename.split('.').pop()?.toLowerCase() || ''
+        files.push({
+          filename,
+          type: (['docx', 'xlsx', 'pptx'].includes(ext) ? ext : 'other') as Deliverable['type'],
+        })
+      }
     }
   }
   return files
@@ -49,10 +64,10 @@ const labelMap: Record<string, string> = {
   other: 'File',
 }
 
-export default function DeliverableViewer({ response }: Props) {
-  const deliverables = extractDeliverables(response)
+export default function DeliverableViewer({ response, deliverables }: Props) {
+  const items = extractDeliverables(response, deliverables)
 
-  if (deliverables.length === 0) return null
+  if (items.length === 0) return null
 
   return (
     <div style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', padding: '0.75rem 1.25rem' }}>
@@ -63,7 +78,7 @@ export default function DeliverableViewer({ response }: Props) {
         </span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {deliverables.map((d) => (
+        {items.map((d) => (
           <a
             key={d.filename}
             href={getDownloadUrl(d.filename)}

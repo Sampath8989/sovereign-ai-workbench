@@ -78,8 +78,8 @@ export default function App() {
               role={role}
             />
           </div>
-          {chatResponse?.response && (
-            <DeliverableViewer response={chatResponse.response} />
+          {chatResponse && (
+            <DeliverableViewer response={chatResponse.response} deliverables={chatResponse.deliverables} />
           )}
         </div>
 

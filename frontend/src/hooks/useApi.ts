@@ -38,6 +38,7 @@ export interface ChatResponse {
   response: string
   model_used?: string
   trace?: string[]
+  deliverables?: string[]
 }
 
 export interface UploadResponse {

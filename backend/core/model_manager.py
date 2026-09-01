@@ -288,7 +288,55 @@ class MockLLM:
         # Simple conversational openers
         if re.match(r'^(what can you do|who are you|what are you|tell me about yourself|what do you do|help)$', cleaned):
             return True
+    @staticmethod
+    def _is_doc_generation_intent(prompt: str) -> bool:
+        """
+        Determine if a prompt is requesting document/report creation (triggering doc_generator)
+        vs a conversational question (triggering pure RAG/chat).
+        """
+        p = prompt.strip().lower()
+
+        # Negative check: pure question patterns that do not request file creation
+        # e.g., "what is the safety valve tolerance?", "explain guideline 26"
+        is_pure_question = (
+            bool(re.match(r'^(what|how|why|when|where|who|which|is\s+there|are\s+there|can\s+you\s+explain|explain|tell\s+me|describe|lookup|search)\b', p))
+            and not any(act in p for act in ['create', 'generate', 'write', 'make', 'draft', 'export', 'prepare', 'save to', 'download', 'produce'])
+        )
+        if is_pure_question:
+            return False
+
+        gen_actions = ['create', 'generate', 'write', 'make', 'draft', 'export', 'prepare', 'produce', 'build', 'summarize into', 'compile']
+        doc_nouns = ['document', 'doc', 'docx', 'report', 'pdf', 'word', 'brief', 'memo', 'whitepaper', 'file']
+
+        for act in gen_actions:
+            for noun in doc_nouns:
+                if f'{act} a {noun}' in p or f'{act} the {noun}' in p or f'{act} {noun}' in p:
+                    return True
+
+        if any(phrase in p for phrase in [
+            'in this document', 'in this report', 'in this memo',
+            'word document', 'word doc', 'pdf report', 'pdf document',
+            'approval note', 'status report', 'project report', 'quarterly report',
+            'safety report', 'summary report', 'technical report', 'compliance report',
+            '.docx', '.pdf'
+        ]):
+            return True
+
         return False
+
+    @staticmethod
+    def _extract_doc_title(prompt: str) -> str:
+        """Extract a readable title from document generation prompt."""
+        p = prompt.strip()
+        m = re.search(r'(?:summarizing|about|for|on|regarding|discussing)\s+(.+?)(?:\.|$)', p, re.IGNORECASE)
+        if m:
+            raw_title = m.group(1).strip()
+            if len(raw_title) > 60:
+                raw_title = raw_title[:57] + "..."
+            return raw_title[:1].upper() + raw_title[1:]
+        if len(p) <= 40:
+            return p
+        return "Engineering Document Summary"
 
     def create_chat_completion(self, messages: Union[str, List[dict]], **kwargs) -> dict:
         """
@@ -329,22 +377,23 @@ class MockLLM:
             )
 
         # --- Deliverable synthesis tool triggers ---
-        # PDF requests -> map to Word document generator (.docx) with clear note that PDF is not directly supported
-        if any(kw in lower for kw in ["pdf", "pdf document", "pdf report", ".pdf"]):
+        # Document / Report / PDF / Word generation
+        if self._is_doc_generation_intent(user_msg):
             uid = uuid.uuid4().hex[:8]
-            plan = [
-                {"tool": "doc_generator", "action": "generate",
-                 "args": [f"report_{uid}.docx", "Project Report (Word Document)",
-                          "Note: Direct PDF export is not currently supported in the Workbench. This document has been generated in Word (.docx) format instead."]}
-            ]
-            return self._wrap_plan(plan)
+            title = self._extract_doc_title(user_msg)
+            if any(kw in lower for kw in ["pdf", ".pdf"]):
+                fname = f"report_{uid}.docx"
+                body_note = f"Note: Direct PDF export is not supported in the Workbench. This document has been generated in Word (.docx) format.\n\nSummary of request: {user_msg}"
+            elif "approval" in lower:
+                fname = f"approval_{uid}.docx"
+                body_note = "This is safe."
+            else:
+                fname = f"report_{uid}.docx"
+                body_note = f"Document Summary:\n\n{user_msg}"
 
-        # Word document generation
-        if any(kw in lower for kw in ["word document", "word doc", "approval note", "docx", "status report", "project report"]):
-            uid = uuid.uuid4().hex[:8]
             plan = [
                 {"tool": "doc_generator", "action": "generate",
-                 "args": [f"approval_{uid}.docx", "Approval Note", "This is safe."]}
+                 "args": [fname, title, body_note]}
             ]
             return self._wrap_plan(plan)
 
