@@ -9,7 +9,7 @@ from typing import Annotated, List, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from backend.core.model_manager import ModelManager
-from backend.agents.planner import generate_plan
+from backend.agents.planner import generate_plan, is_direct_response
 from backend.agents.executor import execute_step
 from backend.tools.rag_search import get_rag
 from backend.tools.citation_tagger import tag_citations
@@ -47,6 +47,13 @@ def plan_node(state: AgentState) -> dict:
     plan = generate_plan(state["input"], _get_model_manager())
     logger.info(f"plan_node: Plan has {len(plan)} steps")
     return {"plan": plan}
+
+
+def should_skip_to_synthesize(state: AgentState) -> bool:
+    """Check if the plan is a direct response (greeting/simple chat) that
+    should skip the execute→retrieve→verify pipeline."""
+    plan = state.get("plan", [])
+    return is_direct_response(plan)
 
 
 def execute_node(state: AgentState) -> dict:
@@ -94,11 +101,28 @@ def synthesize_node(state: AgentState) -> dict:
     """
     Take the accumulated context and retrieved sources, generate answer,
     tag citations, and verify grounding.
+
+    When the plan is a direct response (greeting/simple chat), the plan's
+    first step contains the response text in args. We use it directly
+    without calling the LLM again.
     """
     logger.info("synthesize_node: Generating final answer")
 
     context = state.get("context", {})
     retrieved_sources = state.get("retrieved_sources", [])
+    plan = state.get("plan", [])
+
+    # Check if this is a direct response from MockLLM (greeting/simple chat)
+    if plan and is_direct_response(plan):
+        # The response text is in plan[0].args[0]
+        direct_text = plan[0].get("args", [""])[0] if plan[0].get("args") else ""
+        if direct_text:
+            logger.info("synthesize_node: Using direct response (skipped pipeline)")
+            return {
+                "output": direct_text,
+                "model_used": "Direct Response (Greeting)",
+                "verification": {"grounded": True, "reason": "Direct conversational response"},
+            }
 
     # Compile context into a readable summary
     context_text = "\n".join(
@@ -137,6 +161,14 @@ def synthesize_node(state: AgentState) -> dict:
     raw_output = model_manager.generate_from_messages(model_name, messages)
     logger.info(f"synthesize_node: Raw output: {raw_output[:200]}")
 
+    # Determine which model actually generated the response
+    actual_handle = model_manager.resident_models.get(model_name)
+    from backend.core.model_manager import MockLLM
+    if isinstance(actual_handle, MockLLM):
+        model_used = "MockLLM"
+    else:
+        model_used = model_name
+
     # If the output is raw MockLLM plan JSON, construct a user-friendly message
     output = _humanize_output(raw_output, context, state.get("input", ""))
 
@@ -153,7 +185,7 @@ def synthesize_node(state: AgentState) -> dict:
     if not verification.get("grounded", False):
         output += f"\n\n[Warning: {verification.get('reason', 'Claims may not be fully grounded in sources.')}]"
 
-    return {"output": output, "verification": verification}
+    return {"output": output, "model_used": model_used, "verification": verification}
 
 
 def _humanize_output(raw_output: str, context: dict, user_input: str) -> str:
@@ -210,7 +242,13 @@ def build_graph():
 
     # Add edges
     graph.add_edge(START, "plan_node")
-    graph.add_edge("plan_node", "execute_node")
+
+    # Conditional edge from plan_node: skip pipeline for greetings/simple chat
+    graph.add_conditional_edges(
+        "plan_node",
+        should_skip_to_synthesize,
+        {True: "synthesize_node", False: "execute_node"},
+    )
     graph.add_edge("execute_node", "retrieve_node")
     graph.add_edge("retrieve_node", "synthesize_node")
     graph.add_edge("synthesize_node", END)

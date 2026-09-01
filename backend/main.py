@@ -145,7 +145,40 @@ async def chat_endpoint(req: ChatRequest, role: str = Depends(get_role)):
         from backend.agents.graph import app as graph_app
 
         result = graph_app.invoke({"input": req.prompt, "role": role})
-        return {"response": result.get("output", "")}
+
+        # Build trace from graph state for the frontend AgentTrace component
+        from backend.agents.planner import is_direct_response
+        trace = []
+        context = result.get("context", {})
+        plan = result.get("plan", [])
+        is_direct = plan and is_direct_response(plan)
+
+        if is_direct:
+            trace.append("Planner: Detected greeting — direct response")
+            trace.append("Synthesizer: Generated response")
+        else:
+            if plan:
+                trace.append(f"Planner: Decomposed into {len(plan)} step(s)")
+            for k, v in sorted(context.items()):
+                if k.endswith("_tool"):
+                    step_num = k.split("_")[1]
+                    action = context.get(f"step_{step_num}_action", "")
+                    tool = v
+                    trace.append(f"Executor: {tool}.{action}()")
+            retrieved = result.get("retrieved_sources", [])
+            if retrieved:
+                trace.append(f"Retriever: Found {len(retrieved)} source(s) from knowledge base")
+            else:
+                trace.append("Retriever: No matching sources found")
+            verification = result.get("verification", {})
+            if verification:
+                grounded = verification.get("grounded", False)
+                trace.append(f"Verifier: Grounding check {'PASSED' if grounded else 'incomplete (no sources)'}")
+            trace.append("Synthesizer: Generated final response")
+
+        from backend.config import get_coder_model
+        model_used = result.get("model_used", get_coder_model())
+        return {"response": result.get("output", ""), "model_used": model_used, "trace": trace}
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
