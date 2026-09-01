@@ -39,3 +39,9 @@ workspace/outputs/
 
 # Models (large files)
 models/*.gguf
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/*.tsbuildinfo

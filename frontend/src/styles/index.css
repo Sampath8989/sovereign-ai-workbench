@@ -1,0 +1,235 @@
+/* Google Fonts: Inter + JetBrains Mono */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════
+   DESIGN SYSTEM — Sovereign AI Workbench
+   ═══════════════════════════════════════════════════════
+   Palette: Deep obsidian black + electric green accent + glassmorphism.
+   Fonts:   Inter (body), JetBrains Mono (technical/status).
+   Elevation: translucent glass panels + blurred backdrops + subtle borders.
+   ═══════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    /* Glassy Black Palette */
+    --bg-base: #07090d;
+    --bg-surface: rgba(13, 17, 24, 0.75);
+    --bg-elevated: rgba(22, 28, 40, 0.65);
+    --bg-hover: rgba(32, 41, 58, 0.6);
+    --border-subtle: rgba(255, 255, 255, 0.07);
+    --border-default: rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.2);
+
+    /* Glass Effect */
+    --glass-bg: rgba(15, 20, 30, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-blur: blur(16px);
+    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+    /* Accent */
+    --accent: #00e5a0;
+    --accent-dim: #00c98a;
+    --accent-muted: rgba(0, 229, 160, 0.12);
+    --accent-glow: rgba(0, 229, 160, 0.25);
+
+    /* Semantic */
+    --success: #00e5a0;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --info: #38bdf8;
+
+    /* Text */
+    --text-primary: #f0f4f8;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    /* Typography */
+    --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+
+  body {
+    @apply antialiased;
+    background: radial-gradient(circle at 50% 0%, #0d121c 0%, #05070a 100%);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar {
+    width: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+@layer components {
+  /* ── Glass Cards ────────────────────────────── */
+  .card {
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    box-shadow: var(--glass-shadow);
+    transition: all 0.25s ease;
+  }
+  .card:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  .card-elevated {
+    background: rgba(20, 26, 38, 0.7);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border-default);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  /* ── Badges ─────────────────────────────────── */
+  .badge-green {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border;
+    background: rgba(0, 229, 160, 0.1);
+    color: var(--accent);
+    border-color: rgba(0, 229, 160, 0.25);
+    box-shadow: 0 0 12px rgba(0, 229, 160, 0.15);
+  }
+  .badge-red {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border;
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.25);
+  }
+  .badge-yellow {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border;
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.25);
+  }
+  .badge-blue {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border;
+    background: rgba(56, 189, 248, 0.12);
+    color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.25);
+  }
+  .badge-mono {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.03em;
+  }
+
+  /* ── Buttons ────────────────────────────────── */
+  .btn-primary {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed;
+    background: var(--accent);
+    color: #07090d;
+    box-shadow: 0 2px 10px rgba(0, 229, 160, 0.2);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-dim);
+    box-shadow: 0 0 20px var(--accent-glow);
+  }
+  .btn-danger {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all;
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    backdrop-filter: blur(8px);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.25);
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.25);
+  }
+  .btn-secondary {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    backdrop-filter: blur(8px);
+  }
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-color: var(--border-default);
+  }
+
+  /* ── Skeleton loading ───────────────────────── */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 25%,
+      rgba(255, 255, 255, 0.08) 50%,
+      rgba(255, 255, 255, 0.03) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border-radius: 0.375rem;
+  }
+
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ── Step indicators (trace timeline) ───────── */
+  .step-node {
+    @apply w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold border flex-shrink-0;
+    font-family: var(--font-mono);
+  }
+  .step-node-planner {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+    color: #a78bfa;
+  }
+  .step-node-executor {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+  }
+  .step-node-retriever {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
+  }
+  .step-node-verifier {
+    background: rgba(0, 229, 160, 0.15);
+    border-color: rgba(0, 229, 160, 0.3);
+    color: var(--accent);
+  }
+  .step-node-synthesizer {
+    background: rgba(236, 72, 153, 0.15);
+    border-color: rgba(236, 72, 153, 0.3);
+    color: #f472b6;
+  }
+
+  /* ── Chat message bubbles ───────────────────── */
+  .msg-user {
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    border-radius: 1.125rem 1.125rem 0.25rem 1.125rem;
+    color: var(--text-primary);
+    backdrop-filter: blur(12px);
+  }
+  .msg-assistant {
+    background: rgba(20, 26, 38, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1.125rem 1.125rem 1.125rem 0.25rem;
+    color: var(--text-primary);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  }
+}
