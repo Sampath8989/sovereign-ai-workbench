@@ -720,10 +720,32 @@ class ModelManager:
                 )
             except Exception as e:
                 logger.warning(
-                    f"Failed to load model {model_name} from {model_path}: {e}. "
-                    f"Using MockLLM fallback."
+                    f"\n"
+                    f"======================================================================\n"
+                    f"WARNING: Failed to load model {model_name} from {model_path}: {e}.\n"
+                    f"Attempting emergency fallback to 0.5B model...\n"
+                    f"======================================================================\n"
                 )
-                model_handle = self._mock_llm
+                fallback_path = os.path.join("models", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
+                if os.path.exists(fallback_path) and model_name != "qwen2.5-0.5b-instruct-q4_k_m.gguf":
+                    try:
+                        logger.warning(f"Loading emergency fallback model from {fallback_path}")
+                        model_handle = llama_cpp.Llama(
+                            model_path=fallback_path,
+                            n_ctx=2048,
+                            n_gpu_layers=n_gpu,
+                            verbose=False,
+                        )
+                        logger.warning("Emergency fallback model loaded successfully.")
+                    except Exception as fe:
+                        logger.critical(
+                            f"CRITICAL: Emergency fallback model failed to load ({fe}). "
+                            f"Resorting to MockLLM."
+                        )
+                        model_handle = self._mock_llm
+                else:
+                    logger.warning("Using MockLLM fallback.")
+                    model_handle = self._mock_llm
         else:
             if not LLAMA_CPP_AVAILABLE:
                 logger.warning(
@@ -732,9 +754,41 @@ class ModelManager:
                 )
             else:
                 logger.warning(
-                    f"Model file not found at {model_path}. Using MockLLM fallback."
+                    f"Model file not found at {model_path}."
                 )
-            model_handle = self._mock_llm
+                fallback_path = os.path.join("models", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
+                if os.path.exists(fallback_path) and model_name != "qwen2.5-0.5b-instruct-q4_k_m.gguf":
+                    try:
+                        logger.warning(
+                            f"\n"
+                            f"======================================================================\n"
+                            f"SAFETY WARNING: Primary model {model_name} missing at {model_path}.\n"
+                            f"Loading emergency fallback model from {fallback_path}...\n"
+                            f"======================================================================\n"
+                        )
+                        _cuda_available = False
+                        try:
+                            from llama_cpp import llama_cpp as _lc
+                            _cuda_available = hasattr(_lc, "ggml_backend_cuda_init")
+                        except Exception:
+                            pass
+                        n_gpu = -1 if _cuda_available else 0
+                        model_handle = llama_cpp.Llama(
+                            model_path=fallback_path,
+                            n_ctx=2048,
+                            n_gpu_layers=n_gpu,
+                            verbose=False,
+                        )
+                        logger.warning("Emergency fallback model loaded successfully.")
+                    except Exception as fe:
+                        logger.critical(
+                            f"CRITICAL: Emergency fallback model failed to load ({fe}). "
+                            f"Resorting to MockLLM."
+                        )
+                        model_handle = self._mock_llm
+                else:
+                    logger.warning("Using MockLLM fallback.")
+                    model_handle = self._mock_llm
 
         self.resident_models[model_name] = model_handle
         self.vram_usage[model_name] = estimated_vram
@@ -772,13 +826,15 @@ class ModelManager:
             return f"[StubResponse] Input: {prompt[:100]}"
 
         try:
+            default_stops = ["<|im_end|>", "<|im_start|>", "<|endoftext|>", "user:", "\nuser:"]
             output = model.create_completion(
                 prompt,
                 max_tokens=kwargs.get("max_tokens", 256),
                 temperature=kwargs.get("temperature", 0.7),
-                stop=kwargs.get("stop", None),
+                repeat_penalty=kwargs.get("repeat_penalty", 1.2),
+                stop=kwargs.get("stop", default_stops),
             )
-            return output["choices"][0]["text"]
+            return output["choices"][0]["text"].strip()
         except Exception as e:
             logger.error(f"Generation error on {model_name}: {e}")
             raise
@@ -799,13 +855,31 @@ class ModelManager:
         if isinstance(model, _StubModel):
             return f"[StubResponse] Input: {str(messages)[:100]}"
 
-        # For real llama.cpp models, flatten messages into a prompt
-        prompt = "\n".join(
-            f"{m.get('role', 'user')}: {m.get('content', '')}"
-            for m in messages
-            if isinstance(m, dict)
-        )
-        return self.generate(model_name, prompt, **kwargs)
+        # For real llama.cpp models, use create_chat_completion to leverage
+        # the model's native GGUF chat template (with <|im_start|>/<|im_end|>)
+        try:
+            default_stops = ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]
+            output = model.create_chat_completion(
+                messages=messages,
+                max_tokens=kwargs.get("max_tokens", 256),
+                temperature=kwargs.get("temperature", 0.7),
+                repeat_penalty=kwargs.get("repeat_penalty", 1.2),
+                stop=kwargs.get("stop", default_stops),
+            )
+            choice = output["choices"][0]
+            if "message" in choice and "content" in choice["message"]:
+                return choice["message"]["content"].strip()
+            elif "text" in choice:
+                return choice["text"].strip()
+            return str(output)
+        except Exception as e:
+            logger.warning(f"create_chat_completion failed ({e}), falling back to prompt completion")
+            prompt = "\n".join(
+                f"{m.get('role', 'user')}: {m.get('content', '')}"
+                for m in messages
+                if isinstance(m, dict)
+            )
+            return self.generate(model_name, prompt, **kwargs)
 
     def unload_all(self) -> None:
         while self.resident_models:
