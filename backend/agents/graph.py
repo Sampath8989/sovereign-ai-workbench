@@ -28,7 +28,7 @@ def _get_model_manager() -> ModelManager:
     return _model_manager
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     """State type for the agent graph."""
     input: str
     plan: list
@@ -39,6 +39,7 @@ class AgentState(TypedDict):
     role: str
     model_used: str
     deliverables: list
+    selected_model: str
 
 
 def plan_node(state: AgentState) -> dict:
@@ -142,16 +143,24 @@ def synthesize_node(state: AgentState) -> dict:
         )
 
     model_manager = _get_model_manager()
-    from backend.config import get_coder_model
-    model_name = get_coder_model()
+    from backend.core.router import auto_select_model
+    from backend.config import get_coder_model, _model_file_valid
+
+    selected = state.get("selected_model")
+    if not selected or selected == "auto":
+        model_name = auto_select_model(state["input"])
+    elif _model_file_valid(selected):
+        model_name = selected
+    else:
+        model_name = get_coder_model()
 
     messages = [
         {
             "role": "system",
             "content": (
-                "You are a helpful assistant. Based on the execution context below, "
-                "provide a clear, concise answer to the user's original request. "
-                "Use the retrieved sources to ground your answer when available."
+                "You are an expert AI assistant on an air-gapped sovereign workbench. "
+                "Answer the user's request clearly, concisely, and accurately based on the execution results and retrieved sources below. "
+                "Always cite exact numbers, facts, metrics, and thresholds from retrieved sources when answering technical questions."
             ),
         },
         {
@@ -160,7 +169,7 @@ def synthesize_node(state: AgentState) -> dict:
         },
     ]
 
-    raw_output = model_manager.generate_from_messages(model_name, messages)
+    raw_output = model_manager.generate_from_messages(model_name, messages, max_tokens=192)
     logger.info(f"synthesize_node: Raw output: {raw_output[:200]}")
 
     # Determine which model actually generated the response

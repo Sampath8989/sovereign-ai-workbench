@@ -8,8 +8,10 @@ restricted locals dict containing only known-safe sympy symbols/functions.
 """
 
 import logging
+import platform
 import re
 import signal
+import threading
 from typing import Optional
 
 from sympy import (
@@ -49,6 +51,8 @@ from sympy.parsing.sympy_parser import (
 )
 
 logger = logging.getLogger(__name__)
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 # Seconds before a single expression solve is killed (DoS protection)
 _SOLVE_TIMEOUT_SECONDS = 5
@@ -140,23 +144,51 @@ def _with_timeout(func, *args, timeout: int = _SOLVE_TIMEOUT_SECONDS):
     """
     Run func(*args) with a wall-clock timeout.
     Uses signal.alarm on Linux (main thread only).
+    Uses threading.Event on Windows (signal.alarm not available).
     Returns (result, None) on success, (None, error_msg) on timeout/error.
     """
-    def _handler(signum, frame):
-        raise TimeoutError("Expression too complex to solve within time limit.")
+    if _IS_WINDOWS:
+        # Windows: use threading-based timeout (signal.SIGALRM not available)
+        result_container = [None]
+        exception_container = [None]
+        done_event = threading.Event()
 
-    old_handler = signal.signal(signal.SIGALRM, _handler)
-    signal.alarm(timeout)
-    try:
-        result = func(*args)
-        return result, None
-    except TimeoutError:
-        return None, "Error: expression too complex to solve within time limit (timeout)."
-    except Exception as e:
-        return None, f"Error solving expression: {e}"
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
+        def _worker():
+            try:
+                result_container[0] = func(*args)
+            except Exception as e:
+                exception_container[0] = e
+            finally:
+                done_event.set()
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        t.join(timeout=timeout)
+
+        if t.is_alive():
+            # Thread is still running — timeout occurred
+            return None, "Error: expression too complex to solve within time limit (timeout)."
+
+        if exception_container[0] is not None:
+            return None, f"Error solving expression: {exception_container[0]}"
+        return result_container[0], None
+    else:
+        # Linux/macOS: use signal.alarm (main thread only)
+        def _handler(signum, frame):
+            raise TimeoutError("Expression too complex to solve within time limit.")
+
+        old_handler = signal.signal(signal.SIGALRM, _handler)
+        signal.alarm(timeout)
+        try:
+            result = func(*args)
+            return result, None
+        except TimeoutError:
+            return None, "Error: expression too complex to solve within time limit (timeout)."
+        except Exception as e:
+            return None, f"Error solving expression: {e}"
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
 
 
 def solve_expression(expression: str) -> str:

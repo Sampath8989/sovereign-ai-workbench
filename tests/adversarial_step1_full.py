@@ -5,6 +5,7 @@ All 24 tests, run sequentially with real execution.
 """
 import sys
 import os
+import platform
 import time
 import json
 import socket
@@ -17,6 +18,13 @@ import tempfile
 import uuid
 import random
 import traceback
+import pytest
+
+# Skip entire module on Windows — uses os.fork() and iptables (Linux-only)
+pytestmark = pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="Adversarial tests use os.fork() and iptables (Linux-only features)"
+)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("HARDWARE_TIER", "BUILD")

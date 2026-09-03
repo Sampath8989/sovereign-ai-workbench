@@ -32,6 +32,9 @@ tests/__pycache__/
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+*.lnk
+*.tmp
 
 # Workspace (sandbox files)
 workspace/sandbox_files/

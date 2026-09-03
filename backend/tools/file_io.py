@@ -51,7 +51,27 @@ def read_file(filename: str) -> str:
         return f"Error: Path is not a file: {filename}"
 
     try:
-        return path.read_text(encoding="utf-8")
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(str(path))
+                pages = [page.extract_text() or "" for page in reader.pages]
+                text = "\n\n".join(pages).strip()
+                if not text:
+                    return f"[Empty or image-based PDF: {filename}]"
+                return text
+            except Exception as pe:
+                return f"Error extracting PDF text: {pe}"
+        elif suffix == ".docx":
+            try:
+                import docx
+                doc = docx.Document(str(path))
+                return "\n".join(p.text for p in doc.paragraphs)
+            except Exception as de:
+                return f"Error reading docx file: {de}"
+        else:
+            return path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
         return f"Error: Could not read file: {e}"
 

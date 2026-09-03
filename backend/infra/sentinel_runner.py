@@ -359,14 +359,22 @@ class SovereignSentinel:
             self.audit.log_event("SOVEREIGNTY_BREACH", breach_details)
             return
 
-        # SIGKILL the offending process
+        # Kill the offending process (SIGKILL on Linux, taskkill on Windows)
         if self.enforce_kills and pid and pid > 0:
             try:
-                os.kill(pid, signal.SIGKILL)
-                breach_details["action"] = "sigkill"
+                if OS_TYPE == "Windows":
+                    # On Windows, use taskkill /F for force-kill (equivalent to SIGKILL)
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", str(pid)],
+                        capture_output=True, timeout=5,
+                    )
+                    breach_details["action"] = "taskkill"
+                else:
+                    os.kill(pid, signal.SIGKILL)
+                    breach_details["action"] = "sigkill"
                 logger.warning(
                     f"SOVEREIGNTY BREACH: PID={pid} -> {ip}/{proto}. "
-                    f"Process SIGKILL'd."
+                    f"Process killed."
                 )
             except ProcessLookupError:
                 breach_details["action"] = "process_already_dead"
@@ -378,11 +386,11 @@ class SovereignSentinel:
                 breach_details["action"] = "permission_denied"
                 logger.warning(
                     f"SOVEREIGNTY BREACH: PID={pid} -> {ip}/{proto}. "
-                    f"Cannot SIGKILL (permission denied)."
+                    f"Cannot kill (permission denied)."
                 )
             except Exception as e:
                 breach_details["action"] = f"error: {e}"
-                logger.error(f"SIGKILL failed for PID={pid}: {e}")
+                logger.error(f"Kill failed for PID={pid}: {e}")
         else:
             breach_details["action"] = "log_only"
             logger.warning(f"SOVEREIGNTY BREACH: PID={pid} -> {ip}/{proto} (log only)")

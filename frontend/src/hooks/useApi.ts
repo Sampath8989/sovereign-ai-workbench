@@ -4,15 +4,34 @@ const API_BASE = '/api'
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 120000, // 120s for local multi-step LLM inference
+  timeout: 300000, // 300s (5 min) for local multi-step LLM inference
   headers: { 'Content-Type': 'application/json' },
 })
+
+export interface ModelInfo {
+  id: string
+  name: string
+  category: string
+  param_size?: string
+  vram_gb: number
+  size_gb: number
+  description: string
+  is_present: boolean
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[]
+  default: string
+  active?: string
+}
 
 export interface HealthResponse {
   status: string
   os: string
   hardware_tier: string
   max_vram_gb: number
+  model_roster?: Record<string, number>
+  available_models?: ModelInfo[]
   resident_models: {
     tier: string
     static_ceiling_gb: number
@@ -72,9 +91,15 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return data
 }
 
+// Models list
+export async function fetchModels(): Promise<ModelsResponse> {
+  const { data } = await api.get<ModelsResponse>('/models')
+  return data
+}
+
 // Chat
-export async function sendChat(prompt: string, role: string = 'engineer'): Promise<ChatResponse> {
-  const { data } = await api.post<ChatResponse>('/chat', { prompt }, { params: { role } })
+export async function sendChat(prompt: string, role: string = 'engineer', model: string = 'auto'): Promise<ChatResponse> {
+  const { data } = await api.post<ChatResponse>('/chat', { prompt, model }, { params: { role } })
   return data
 }
 
@@ -109,7 +134,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   const { data } = await api.post<UploadResponse>(`/upload?target_filename=${encodeURIComponent(file.name)}`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
-  return data
+  return { ...data, filename: data.filename || file.name }
 }
 
 // Build download URL

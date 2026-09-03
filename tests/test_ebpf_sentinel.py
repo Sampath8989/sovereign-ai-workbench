@@ -5,12 +5,20 @@ Tests the SovereignSentinel and egress enforcement.
 """
 import sys
 import os
+import platform
 import time
 import json
 import socket
 import threading
 import subprocess
 import signal
+import pytest
+
+# Skip entire module on Windows — uses os.fork() and iptables (Linux-only)
+pytestmark = pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="eBPF/Sentinel tests use os.fork() and iptables (Linux-only features)"
+)
 
 sys.path.insert(0, os.path.dirname(__file__) + "/..")
 os.environ["HARDWARE_TIER"] = "BUILD"

@@ -131,13 +131,24 @@ except ImportError:
 # misclassifies a chunk.  A determined adversarial document could still
 # evade these simple keyword/regex checks.
 #
+# NOTE: Word-based patterns like "\bX million\b" are intentionally excluded
+# because they produce false positives on legitimate engineering cost estimates
+# (e.g., "turbine costs $2.5 million").  Only keyword + currency patterns used.
+#
+# B/M/K suffix pattern (\$X.XB, \$X.XM, \$XK) catches abbreviated financial
+# amounts that don't use comma formatting.  This closes a gap where the exact
+# leak format (e.g., "$8.3B") was missed.  The pattern is intentionally broad
+# on B/M/K suffixes because any such abbreviation in an engineering context
+# signals a high-value figure worth flagging for human review.  False positives
+# on legitimate cost estimates are acceptable here — this is defense-in-depth,
+# not a hard gate.
 _SENSITIVE_PATTERNS = re.compile(
     r'\b(?:confidential|restricted|secret|budget|salary|payroll|compensation|'
     r'financial\s+statement|earnings|revenue|profit|loss|quarterly\s+report|'
     r'merger\s+value|acquisition\s+price|ipo|valuation|stock\s+price|'
     r'insider\s+trading|non-disclosure|nda)\b'
     r'|\$\s*\d{1,3}(?:,\d{3}){2,}(?:\.\d{2})?'  # currency >= $1,000,000 (3+ comma groups)
-    r'|\b\d+(?:\.\d+)?\s*(?:million|billion|trillion)\b',  # large amounts in words
+    r'|\$\s*\d{1,3}(?:\.\d{1,3})?\s*[BMK]\b',  # abbreviated: $8.3B, $500K, $3.2M
     re.IGNORECASE,
 )
 

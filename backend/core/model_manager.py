@@ -305,6 +305,10 @@ class MockLLM:
         if is_pure_question:
             return False
 
+        # Exclude read/analyze operations on existing files
+        if any(kw in p for kw in ['analyze uploaded file', 'read this', 'read the', 'read file', 'analyze file', 'open file', 'summarize file', 'inspect file']):
+            return False
+
         gen_actions = ['create', 'generate', 'write', 'make', 'draft', 'export', 'prepare', 'produce', 'build', 'summarize into', 'compile']
         doc_nouns = ['document', 'doc', 'docx', 'report', 'pdf', 'word', 'brief', 'memo', 'whitepaper', 'file']
 
@@ -318,7 +322,7 @@ class MockLLM:
             'word document', 'word doc', 'pdf report', 'pdf document',
             'approval note', 'status report', 'project report', 'quarterly report',
             'safety report', 'summary report', 'technical report', 'compliance report',
-            '.docx', '.pdf'
+            '.docx'
         ]):
             return True
 
@@ -479,9 +483,15 @@ class MockLLM:
 
         # File I/O triggers
         user_lower = user_msg.lower()
-        file_match = re.search(r'(?:read|write|open|load)\s+(?:the\s+)?(?:file\s+)?([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)', user_lower)
+        file_match = re.search(
+            r'(?:read|write|open|load|analyze|inspect|summarize|explain)\s+(?:the\s+)?(?:uploaded\s+)?(?:file\s*:?\s*)?([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]+)',
+            user_lower
+        )
+        if not file_match:
+            file_match = re.search(r'\b([a-zA-Z0-9_\-\./]+\.(?:pdf|txt|docx|xlsx|csv|json|md|py|log))\b', user_lower)
+
         if (file_match or
-                any(kw in user_lower for kw in ["read test.txt", "read the file", "file_io", "read file"]) or
+                any(kw in user_lower for kw in ["read test.txt", "read the file", "file_io", "read file", "uploaded file", "this pdf", "this document"]) or
                 re.search(r'\bplan\b', user_lower) or re.search(r'\bsteps\b', user_lower) or re.search(r'\bdecompos', user_lower)):
             fname = file_match.group(1) if file_match else "test.txt"
             plan = [
@@ -696,6 +706,13 @@ class ModelManager:
         estimated_vram = self._estimate_model_vram(model_name)
         self.refresh_vram_budget()
 
+        # If USE_MOCK_LLM env var is set, return mock LLM directly
+        if os.getenv("USE_MOCK_LLM", "").lower() in ("1", "true", "yes"):
+            self.resident_models[model_name] = self._mock_llm
+            self.vram_usage[model_name] = estimated_vram
+            self._total_vram_used += estimated_vram
+            return self._mock_llm
+
         # Check if model exceeds total budget
         if estimated_vram > self.max_vram_gb:
             msg = (
@@ -751,26 +768,45 @@ class ModelManager:
 
         # Try to load real model, fall back to MockLLM if unavailable
         if LLAMA_CPP_AVAILABLE and os.path.exists(model_path):
-            # Determine GPU layers: use -1 (all) if CUDA compiled in, else 0 (CPU only)
+            # Determine GPU support via llama_supports_gpu_offload() or CUDA backend
             _cuda_available = False
             try:
-                from llama_cpp import llama_cpp as _lc
-                _cuda_available = hasattr(_lc, "ggml_backend_cuda_init")
+                if hasattr(llama_cpp, "llama_supports_gpu_offload"):
+                    _cuda_available = llama_cpp.llama_supports_gpu_offload()
+                if not _cuda_available:
+                    from llama_cpp import llama_cpp as _lc
+                    _cuda_available = hasattr(_lc, "ggml_backend_cuda_init")
             except Exception:
                 pass
-            n_gpu = -1 if _cuda_available else 0
-            backend = "CUDA GPU" if _cuda_available else "CPU only"
+
+            # Calculate safe GPU layers for 4GB VRAM
+            if _cuda_available:
+                clean = model_name.lower()
+                if "14b" in clean:
+                    n_gpu = 12  # Hybrid GPU/CPU offload for 14B models on 4GB VRAM
+                elif "7b" in clean:
+                    n_gpu = 26  # Substantial GPU offload for 7B models on 4GB VRAM
+                else:
+                    n_gpu = -1  # Full GPU offload for <=4B models
+                backend = f"CUDA GPU ({n_gpu} layers)"
+            else:
+                n_gpu = 0
+                backend = "CPU only"
+
+            n_threads = max(1, min(8, (os.cpu_count() or 4) - 2))
 
             try:
                 logger.info(
                     f"Loading model {model_name} from {model_path} "
-                    f"(n_gpu_layers={n_gpu}, backend={backend})"
+                    f"(n_gpu_layers={n_gpu}, backend={backend}, n_threads={n_threads})"
                 )
                 t_load_start = time.time()
                 model_handle = llama_cpp.Llama(
                     model_path=model_path,
                     n_ctx=2048,
                     n_gpu_layers=n_gpu,
+                    n_threads=n_threads,
+                    n_batch=512,
                     verbose=False,
                 )
                 t_load = time.time() - t_load_start
@@ -779,32 +815,10 @@ class ModelManager:
                 )
             except Exception as e:
                 logger.warning(
-                    f"\n"
-                    f"======================================================================\n"
-                    f"WARNING: Failed to load model {model_name} from {model_path}: {e}.\n"
-                    f"Attempting emergency fallback to 0.5B model...\n"
-                    f"======================================================================\n"
+                    f"Failed to load model {model_name} from {model_path}: {e}. "
+                    f"Falling back to MockLLM."
                 )
-                fallback_path = os.path.join("models", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
-                if os.path.exists(fallback_path) and model_name != "qwen2.5-0.5b-instruct-q4_k_m.gguf":
-                    try:
-                        logger.warning(f"Loading emergency fallback model from {fallback_path}")
-                        model_handle = llama_cpp.Llama(
-                            model_path=fallback_path,
-                            n_ctx=2048,
-                            n_gpu_layers=n_gpu,
-                            verbose=False,
-                        )
-                        logger.warning("Emergency fallback model loaded successfully.")
-                    except Exception as fe:
-                        logger.critical(
-                            f"CRITICAL: Emergency fallback model failed to load ({fe}). "
-                            f"Resorting to MockLLM."
-                        )
-                        model_handle = self._mock_llm
-                else:
-                    logger.warning("Using MockLLM fallback.")
-                    model_handle = self._mock_llm
+                model_handle = self._mock_llm
         else:
             if not LLAMA_CPP_AVAILABLE:
                 logger.warning(
@@ -813,41 +827,9 @@ class ModelManager:
                 )
             else:
                 logger.warning(
-                    f"Model file not found at {model_path}."
+                    f"Model file not found at {model_path}. Using MockLLM fallback."
                 )
-                fallback_path = os.path.join("models", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
-                if os.path.exists(fallback_path) and model_name != "qwen2.5-0.5b-instruct-q4_k_m.gguf":
-                    try:
-                        logger.warning(
-                            f"\n"
-                            f"======================================================================\n"
-                            f"SAFETY WARNING: Primary model {model_name} missing at {model_path}.\n"
-                            f"Loading emergency fallback model from {fallback_path}...\n"
-                            f"======================================================================\n"
-                        )
-                        _cuda_available = False
-                        try:
-                            from llama_cpp import llama_cpp as _lc
-                            _cuda_available = hasattr(_lc, "ggml_backend_cuda_init")
-                        except Exception:
-                            pass
-                        n_gpu = -1 if _cuda_available else 0
-                        model_handle = llama_cpp.Llama(
-                            model_path=fallback_path,
-                            n_ctx=2048,
-                            n_gpu_layers=n_gpu,
-                            verbose=False,
-                        )
-                        logger.warning("Emergency fallback model loaded successfully.")
-                    except Exception as fe:
-                        logger.critical(
-                            f"CRITICAL: Emergency fallback model failed to load ({fe}). "
-                            f"Resorting to MockLLM."
-                        )
-                        model_handle = self._mock_llm
-                else:
-                    logger.warning("Using MockLLM fallback.")
-                    model_handle = self._mock_llm
+            model_handle = self._mock_llm
 
         self.resident_models[model_name] = model_handle
         self.vram_usage[model_name] = estimated_vram
@@ -875,10 +857,10 @@ class ModelManager:
 
     def generate(self, model_name: str, prompt: str, **kwargs) -> str:
         """Generate text using the specified model."""
-        model = self.load_model(model_name)
+        model = self.load_model(model_name, reject_oversized=False)
 
         if isinstance(model, MockLLM):
-            output = model.create_chat_completion(prompt, **kwargs)
+            output = model.create_completion(prompt, **kwargs)
             return output["choices"][0]["text"]
 
         if isinstance(model, _StubModel):
@@ -905,7 +887,7 @@ class ModelManager:
         Generate text from a list of chat messages.
         Uses MockLLM's create_chat_completion for mock mode.
         """
-        model = self.load_model(model_name)
+        model = self.load_model(model_name, reject_oversized=False)
 
         if isinstance(model, MockLLM):
             output = model.create_chat_completion(messages, **kwargs)

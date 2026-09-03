@@ -6,10 +6,12 @@ import SovereigntyMonitor from './components/SovereigntyMonitor'
 import ModelStatus from './components/ModelStatus'
 import AgentTrace from './components/AgentTrace'
 import RoleSwitcher from './components/RoleSwitcher'
+import ModelSelector from './components/ModelSelector'
 import { sendChat, type ChatResponse } from './hooks/useApi'
 
 export default function App() {
   const [role, setRole] = useState<'engineer' | 'manager'>('engineer')
+  const [selectedModel, setSelectedModel] = useState<string>('auto')
   const [chatResponse, setChatResponse] = useState<ChatResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -19,7 +21,7 @@ export default function App() {
     setLoading(true)
     setError(null)
     try {
-      const res = await sendChat(prompt, role)
+      const res = await sendChat(prompt, role, selectedModel)
       setChatResponse(res)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Request failed'
@@ -27,7 +29,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [role])
+  }, [role, selectedModel])
 
   return (
     <div className="h-screen flex flex-col" style={{ background: 'var(--bg-base)' }}>
@@ -58,11 +60,19 @@ export default function App() {
             </h1>
             <p className="text-[10px] font-medium flex items-center gap-1.5" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
-              SIH 2026 · Air-Gapped Local Hardware Execution
+              Air-Gapped Local Hardware Execution · Ollama 7B & 14B
             </p>
           </div>
         </div>
-        <RoleSwitcher role={role} onChange={setRole} />
+
+        {/* Controls: Model Engine Dropdown + Role Switcher */}
+        <div className="flex items-center gap-2.5">
+          <ModelSelector
+            selectedModel={selectedModel}
+            onSelectModel={setSelectedModel}
+          />
+          <RoleSwitcher role={role} onChange={setRole} />
+        </div>
       </header>
 
       {/* Main content */}
@@ -92,7 +102,7 @@ export default function App() {
           }}
         >
           <SovereigntyMonitor onTrigger={() => setSentinelTriggered(true)} />
-          <ModelStatus />
+          <ModelStatus selectedModel={selectedModel} />
           <AgentTrace trace={chatResponse?.trace} />
         </div>
       </div>

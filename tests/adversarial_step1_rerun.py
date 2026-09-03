@@ -4,7 +4,13 @@ ADVERSARIAL QA AUDIT — STEP 2 RE-RUN (post-fixes)
 All 24 tests with corrected evidence and layer separation.
 """
 import sys, os, time, json, socket, threading, subprocess, signal
-import hashlib, concurrent.futures, tempfile, uuid, hashlib
+import hashlib, concurrent.futures, tempfile, uuid, hashlib, platform, pytest
+
+# Skip entire module on Windows — uses os.fork() and iptables (Linux-only)
+pytestmark = pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="Adversarial tests use os.fork() and iptables (Linux-only features)"
+)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("HARDWARE_TIER", "BUILD")

@@ -5,6 +5,7 @@ Each test uses tmp_path for audit log files, ensuring full isolation.
 The conftest.py autouse fixture resets the AuditLogger singleton before each test.
 """
 import os
+import platform
 import sys
 import time
 import json
@@ -18,6 +19,12 @@ import uuid
 import traceback
 
 import pytest
+
+# Skip entire module on Windows — uses os.fork() and iptables (Linux-only)
+pytestmark = pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="Adversarial tests use os.fork() and iptables (Linux-only features)"
+)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("HARDWARE_TIER", "BUILD")

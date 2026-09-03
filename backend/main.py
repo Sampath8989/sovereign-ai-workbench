@@ -14,7 +14,8 @@ from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Re
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.config import get_tier, get_max_vram_gb, get_model_roster
+from typing import Optional
+from backend.config import get_tier, get_max_vram_gb, get_model_roster, get_available_models
 from backend.core.audit_log import AuditLogger, verify_chain
 from backend.core.auth import get_role
 from backend.core.model_manager import ModelManager
@@ -110,6 +111,7 @@ class GenerateRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     prompt: str
+    model: Optional[str] = "auto"
 
 
 class IngestRequest(BaseModel):
@@ -128,8 +130,22 @@ async def health():
         "hardware_tier": get_tier(),
         "max_vram_gb": get_max_vram_gb(),
         "model_roster": get_model_roster(),
+        "available_models": get_available_models(),
         "resident_models": model_manager.get_status() if model_manager else {},
         "sentinel": sentinel.get_status() if sentinel else {},
+    }
+
+
+@app.get("/models")
+async def get_models_endpoint():
+    """Return all available local models and the auto routing option."""
+    models = get_available_models()
+    resident = list(model_manager.resident_models.keys()) if model_manager else []
+    active = resident[-1] if resident else "auto"
+    return {
+        "models": models,
+        "default": "auto",
+        "active": active,
     }
 
 
@@ -144,7 +160,11 @@ async def chat_endpoint(req: ChatRequest, role: str = Depends(get_role)):
     try:
         from backend.agents.graph import app as graph_app
 
-        result = graph_app.invoke({"input": req.prompt, "role": role})
+        result = graph_app.invoke({
+            "input": req.prompt,
+            "role": role,
+            "selected_model": req.model or "auto",
+        })
 
         # Build trace from graph state for the frontend AgentTrace component
         from backend.agents.planner import is_direct_response
@@ -437,6 +457,7 @@ async def upload_file(request: Request, file: UploadFile = File(...), target_fil
         logger.info(f"File uploaded: {target_path} ({len(content)} bytes)")
         return {
             "status": "File uploaded",
+            "filename": target_filename,
             "path": f"workspace/sandbox_files/{target_filename}",
             "size": len(content),
         }

@@ -19,9 +19,11 @@ logger = logging.getLogger(__name__)
 # Pre-compiled regex patterns with word-boundary anchors for each category.
 # Using \b ensures "encode" doesn't match \bcode\b, "profile" doesn't
 # match \bfile\b, etc.
-CODE_PATTERN = re.compile(r'\b(code|script|execute)\b')
+CODE_PATTERN = re.compile(r'\b(code|script|execute|function|class|program|debug|refactor|html|css|js|sql|regex|docx|pptx|xlsx|spreadsheet|word document|powerpoint)\b')
 FILE_PATTERN = re.compile(r'\b(read|file|write)\b')
-VISION_PATTERN = re.compile(r'\b(image|scan|drawing)\b')
+VISION_PATTERN = re.compile(r'\b(image|scan|drawing|photo|diagram|picture|visual|ocr|p&id)\b')
+REASONING_PATTERN = re.compile(r'\b(math|calculate|calculation|equation|solve|integral|derivative|algebra|proof|reason|reasoning|why|step-by-step|logic|verify|verification|audit|evaluate)\b')
+SYNTHESIS_PATTERN = re.compile(r'\b(architecture|comprehensive|deep dive|strategic|executive summary|detailed analysis)\b')
 
 # Negation markers — words/phrases that negate a following keyword.
 # Checked within a ~3-word window before the keyword, but only within
@@ -111,3 +113,61 @@ def route_task(prompt: str) -> str:
     # Default: TEXT
     logger.info(f"Routing prompt to TEXT: {prompt[:60]}")
     return "TEXT"
+
+
+def auto_select_model(prompt: str) -> str:
+    """
+    Intelligently select the best local model file on disk based on the prompt's intent.
+    Routes to:
+      - DeepSeek R1 7B for math, complex logic, and step-by-step reasoning
+      - Qwen 2.5 Coder 7B for coding, script execution, and deliverable synthesis
+      - LLaVA 7B for visual reasoning, OCR, and diagram analysis
+      - Phi-4 14B for deep architecture analysis and comprehensive synthesis
+      - Qwen 2.5 7B Instruct / Qwen 1.5 4B for general conversational queries
+    """
+    from backend.config import _model_file_valid, get_coder_model, get_router_model
+    lower = prompt.lower()
+
+    # 1. Math & Step-by-Step Reasoning -> DeepSeek R1 7B
+    if _has_keyword(REASONING_PATTERN, lower):
+        if _model_file_valid("deepseek-r1-7b.gguf"):
+            logger.info("Auto-selected DeepSeek R1 7B for reasoning/math task")
+            return "deepseek-r1-7b.gguf"
+        if _model_file_valid("phi4-14b.gguf"):
+            logger.info("Auto-selected Phi-4 14B for reasoning task (fallback)")
+            return "phi4-14b.gguf"
+
+    # 2. Vision & Diagram / OCR Tasks -> LLaVA 7B
+    if _has_keyword(VISION_PATTERN, lower):
+        if _model_file_valid("llava-7b.gguf"):
+            logger.info("Auto-selected LLaVA 7B for vision task")
+            return "llava-7b.gguf"
+
+    # 3. Coding & Deliverable Generation -> Qwen 2.5 Coder 7B
+    if _has_keyword(CODE_PATTERN, lower):
+        if _model_file_valid("qwen2.5-coder-7b-instruct-q3_k_m.gguf"):
+            logger.info("Auto-selected Qwen 2.5 Coder 7B for coding/deliverable task")
+            return "qwen2.5-coder-7b-instruct-q3_k_m.gguf"
+        if _model_file_valid("qwen2.5-coder-3b-instruct-q4_k_m.gguf"):
+            logger.info("Auto-selected Qwen 2.5 Coder 3B for coding task")
+            return "qwen2.5-coder-3b-instruct-q4_k_m.gguf"
+
+    # 4. Deep Synthesis & Comprehensive Analysis -> Phi-4 14B
+    if _has_keyword(SYNTHESIS_PATTERN, lower):
+        if _model_file_valid("phi4-14b.gguf"):
+            logger.info("Auto-selected Phi-4 14B for deep synthesis task")
+            return "phi4-14b.gguf"
+
+    # 5. General Chat & QA -> Qwen 2.5 7B Instruct -> Qwen 2.5 7B -> Qwen 1.5 4B -> Router
+    if _model_file_valid("qwen2.5-7b-instruct-q3_k_m.gguf"):
+        logger.info("Auto-selected Qwen 2.5 7B Instruct for general task")
+        return "qwen2.5-7b-instruct-q3_k_m.gguf"
+    if _model_file_valid("qwen2.5-7b.gguf"):
+        logger.info("Auto-selected Qwen 2.5 7B for general task")
+        return "qwen2.5-7b.gguf"
+    if _model_file_valid("qwen1_5-4b-chat-q4_k_m.gguf"):
+        logger.info("Auto-selected Qwen 1.5 4B for general task")
+        return "qwen1_5-4b-chat-q4_k_m.gguf"
+
+    return get_router_model()
+
