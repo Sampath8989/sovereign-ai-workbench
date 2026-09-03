@@ -22,20 +22,31 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [1/3] Creating Python Virtual Environment (venv)...
+echo [1/5] Creating Python Virtual Environment (venv)...
 if not exist venv (
     python -m venv venv
 )
 call venv\Scripts\activate.bat
 
-echo [2/3] Installing Python Backend Dependencies...
+echo [2/5] Installing Python Backend Dependencies...
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements.txt huggingface_hub
 
-echo [3/3] Installing Frontend Dependencies...
+echo [3/5] Installing Frontend Dependencies...
 cd frontend
 call npm install
 cd ..
+
+echo [4/5] Setting up Environment (.env)...
+if not exist .env (
+    if exist .env.example (
+        copy .env.example .env >nul
+        echo [OK] Created .env from .env.example
+    )
+)
+
+echo [5/5] Downloading Local Models for Offline Inference...
+python scripts\download_models.py --model recommended
 
 echo.
 echo ===================================================
