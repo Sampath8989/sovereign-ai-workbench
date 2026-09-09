@@ -12,6 +12,11 @@ export default function SovereigntyMonitor({ onTrigger }: Props) {
   const [monitoring, setMonitoring] = useState(false)
   const [iptables, setIptables] = useState(false)
   const [triggering, setTriggering] = useState(false)
+  const [testResult, setTestResult] = useState<{
+    passed: boolean
+    message: string
+    detail?: Record<string, unknown>
+  } | null>(null)
 
   const poll = useCallback(async () => {
     try {
@@ -33,10 +38,24 @@ export default function SovereigntyMonitor({ onTrigger }: Props) {
 
   const handleTrigger = async () => {
     setTriggering(true)
+    setTestResult(null)
     try {
-      await triggerSentinel()
+      const res = await triggerSentinel()
+      // The self-test is idempotent and non-mutating: it reports pass/fail
+      // without incrementing the breach counter (which stays unchanged).
+      const detail = res?.detail as Record<string, unknown> | undefined
+      const passed = typeof detail?.passed === 'boolean' ? Boolean(detail.passed) : (res?.passed === true)
+      setTestResult({
+        passed,
+        message: typeof res?.message === 'string'
+          ? res.message
+          : passed
+            ? 'Sovereignty self-test passed: outbound traffic blocked by kernel rules.'
+            : 'Sovereignty self-test failed: synthetic leak breached kernel boundary.',
+        detail,
+      })
       onTrigger()
-      await poll() // refresh breach count
+      await poll() // refresh breach count (unchanged by the self-test)
     } catch {
       // sentinel trigger may fail if backend is down
     } finally {
@@ -121,6 +140,66 @@ export default function SovereigntyMonitor({ onTrigger }: Props) {
           </span>
         </div>
       </div>
+
+      {/* Self-test result (non-mutating pass/fail report) */}
+      {testResult && !triggering && (
+        <div className="flex flex-col gap-2 mb-3">
+          <div
+            className="flex items-center gap-2 px-3 py-2 rounded-lg"
+            style={{
+              background: testResult.passed ? 'rgba(0, 229, 160, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+              border: `1px solid ${testResult.passed ? 'rgba(0, 229, 160, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+            }}
+          >
+            {testResult.passed ? (
+              <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent)' }} />
+            ) : (
+              <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#f87171' }} />
+            )}
+            <span
+              className="text-[11px] font-medium"
+              style={{ color: testResult.passed ? 'var(--accent)' : '#f87171', fontFamily: 'var(--font-mono)' }}
+            >
+              {testResult.message}
+            </span>
+          </div>
+
+          {/* Failure diagnostic fields */}
+          {!testResult.passed && testResult.detail && (
+            <div
+              className="px-3 py-2.5 rounded-lg text-[10px] space-y-1 font-mono"
+              style={{
+                background: 'rgba(239, 68, 68, 0.05)',
+                border: '1px solid rgba(239, 68, 68, 0.15)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <div className="font-semibold text-[#f87171] uppercase tracking-wider mb-1">
+                Egress Diagnostics
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Target:</span>
+                <span className="text-text-primary">{String(testResult.detail.target || '8.8.8.8:53')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Protocol:</span>
+                <span className="text-text-primary">{String(testResult.detail.protocol || 'UDP/TCP')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Process:</span>
+                <span className="text-text-primary">
+                  {String(testResult.detail.initiating_process_name || 'python')} (PID {String(testResult.detail.initiating_pid || '?')})
+                </span>
+              </div>
+              {Boolean(testResult.detail.root_cause) && (
+                <div className="mt-1 pt-1 border-t border-red-500/10 text-[9px] text-[#fca5a5]">
+                  Root Cause: {String(testResult.detail.root_cause)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Trigger button */}
       <button

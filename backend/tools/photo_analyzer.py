@@ -5,6 +5,7 @@ using a Vision Model (or MockVisionModel fallback).
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -76,13 +77,37 @@ def analyze_nameplate(image_path: str) -> dict:
         A dict with equipment_type, model, serial, manufacturer, raw_text.
     """
     # Path containment: reject paths that escape the sandbox directory
-    from backend.tools.path_safety import safe_resolve_input_path
+    from backend.tools.path_safety import safe_resolve_input_path, resolve_existing_casefold
     _sandbox_dir = Path(__file__).resolve().parent.parent.parent / "workspace" / "sandbox_files"
     try:
         resolved = safe_resolve_input_path(image_path, _sandbox_dir)
     except ValueError as e:
         raise ValueError(f"Photo analyzer rejected path: {e}")
+
+    # Resolve to the real on-disk file when the referenced name differs only
+    # by letter case from the actual uploaded filename (uploaded screenshots
+    # keep their original mixed case, e.g. "Screenshot_2026-09-03_15-43-10.png").
+    real_resolved = resolve_existing_casefold(resolved)
+    if real_resolved is not None:
+        resolved = real_resolved
     image_path = str(resolved)
+
+    # Explicit no-match: if the referenced image does not exist, return a
+    # result that says so. Never fabricate nameplate data or a confidence
+    # score for a file that isn't there.
+    if not os.path.exists(image_path) or not os.path.isfile(image_path):
+        logger.warning(f"Photo analyzer: no file found at {image_path}")
+        return {
+            "status": "no_match_found",
+            "message": f"No image file found at {Path(image_path).name}. "
+                       "Upload the photo via the attach button first.",
+            "equipment_type": "unknown",
+            "model": "unknown",
+            "serial": "unknown",
+            "manufacturer": "unknown",
+            "confidence": None,
+            "source": Path(image_path).name,
+        }
 
     # Step 1: Call Vision Model
     vision = _get_vision_model()

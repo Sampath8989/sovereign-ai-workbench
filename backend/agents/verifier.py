@@ -56,15 +56,24 @@ class CitationVerifier:
             for i, s in enumerate(sources[:5])  # limit to top 5 sources
         )
 
+        # Bound prompt size on CPU to prevent long prompt ingestion stalls
+        sample_text = generated_text[:2500] if len(generated_text) > 2500 else generated_text
+
         messages = [
             {"role": "system", "content": VERIFY_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Generated text:\n{generated_text}\n\nSources:\n{source_text}"},
+            {"role": "user", "content": f"Generated text:\n{sample_text}\n\nSources:\n{source_text}"},
         ]
 
         try:
             from backend.config import get_coder_model
-            model_name = get_coder_model()
-            response = self.model_manager.generate_from_messages(model_name, messages)
+            # Optimization: reuse currently resident model if available to avoid expensive model eviction and reloading
+            model_name = None
+            if hasattr(self.model_manager, "resident_models") and self.model_manager.resident_models:
+                model_name = list(self.model_manager.resident_models.keys())[0]
+            if not model_name:
+                model_name = get_coder_model()
+
+            response = self.model_manager.generate_from_messages(model_name, messages, max_tokens=128)
             return self._parse_verification(response)
         except Exception as e:
             logger.error(f"Verification failed: {e}")

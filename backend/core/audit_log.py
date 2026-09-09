@@ -30,7 +30,7 @@ class _WriterThread:
         self._queue: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
-        self._next_sequence = 1
+        self._file_sequences: Dict[str, int] = {}
         self._init_lock = threading.Lock()
 
     def _loop(self):
@@ -51,10 +51,11 @@ class _WriterThread:
             finally:
                 result_holder["done"].set()
 
-    def _get_last_hash(self, file_path: str) -> str:
+    def _get_last_hash_and_seq(self, file_path: str) -> tuple:
         if not os.path.exists(file_path):
-            return "GENESIS"
+            return "GENESIS", 0
         last_hash = "GENESIS"
+        last_seq = 0
         try:
             with open(file_path, "r") as f:
                 for line in f:
@@ -64,10 +65,17 @@ class _WriterThread:
                     try:
                         entry = json.loads(line)
                         last_hash = entry.get("current_hash", last_hash)
+                        seq = entry.get("sequence", 0)
+                        if seq > last_seq:
+                            last_seq = seq
                     except json.JSONDecodeError:
                         continue
         except IOError:
-            return "GENESIS"
+            return "GENESIS", 0
+        return last_hash, last_seq
+
+    def _get_last_hash(self, file_path: str) -> str:
+        last_hash, _ = self._get_last_hash_and_seq(file_path)
         return last_hash
 
     def _compute_hash(self, prev_hash: str, entry_data: dict) -> str:
@@ -75,9 +83,10 @@ class _WriterThread:
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def _write_entry(self, file_path, checkpoint_file, event_type, details):
-        prev_hash = self._get_last_hash(file_path)
-        seq = self._next_sequence
-        self._next_sequence += 1
+        prev_hash, last_seq = self._get_last_hash_and_seq(file_path)
+        canon_path = os.path.abspath(file_path)
+        seq = last_seq + 1
+        self._file_sequences[canon_path] = seq + 1
 
         entry_data = {
             "timestamp": time.time(),
@@ -115,27 +124,26 @@ class _WriterThread:
 
     def sync_sequence_from_file(self, file_path):
         """Initialize sequence counter from existing log file."""
+        canon_path = os.path.abspath(file_path)
         with self._init_lock:
-            if not os.path.exists(file_path):
-                return
             last_seq = 0
-            try:
-                with open(file_path, "r") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                            seq = entry.get("sequence", 0)
-                            if seq > last_seq:
-                                last_seq = seq
-                        except json.JSONDecodeError:
-                            continue
-            except IOError:
-                pass
-            if last_seq >= self._next_sequence:
-                self._next_sequence = last_seq + 1
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = json.loads(line)
+                                seq = entry.get("sequence", 0)
+                                if seq > last_seq:
+                                    last_seq = seq
+                            except json.JSONDecodeError:
+                                continue
+                except IOError:
+                    pass
+            self._file_sequences[canon_path] = last_seq + 1
 
 
 # Module-level singleton writer
@@ -222,13 +230,14 @@ class AuditLogger:
     def clear(self):
         """Clear the audit log and checkpoints (for testing)."""
         global _singleton_writer
+        canon_path = os.path.abspath(self.file_path)
         with _singleton_lock:
             if os.path.exists(self.file_path):
                 os.remove(self.file_path)
             if os.path.exists(self.checkpoint_file):
                 os.remove(self.checkpoint_file)
             if _singleton_writer:
-                _singleton_writer._next_sequence = 1
+                _singleton_writer._file_sequences[canon_path] = 1
 
     @staticmethod
     def _reset_for_testing() -> None:

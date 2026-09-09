@@ -334,12 +334,13 @@ class TestDemoDSovereignty:
         assert resp.status_code == 400
 
     def test_sentinel_synthetic_leak(self):
-        """Sentinel synthetic leak should succeed and be logged."""
+        """Sentinel self-test is idempotent and reports pass/fail."""
         resp = requests.post(f"{BASE_URL}/test/sentinel", timeout=15)
         assert resp.status_code == 200
         data = resp.json()
         assert "status" in data
-        assert data["status"] == "Leak triggered, check audit log"
+        assert data["status"] == "test_completed"
+        assert "passed" in data, f"Self-test should report pass/fail: {data}"
 
     def test_audit_log_integrity(self):
         """Audit log hash chain should be valid after sentinel test."""
@@ -355,31 +356,35 @@ class TestDemoDSovereignty:
         assert "entry_count" in data, f"Audit response missing 'entry_count' field: {data}"
         assert data["entry_count"] > 0, "Audit log should have at least one entry"
 
-    def test_audit_log_contains_breach(self):
-        """Audit log should contain a SOVEREIGNTY_BREACH event from sentinel test."""
-        # First trigger the sentinel
+    def test_audit_log_contains_self_test_not_breach(self):
+        """
+        The sovereignty self-test logs SYNTHETIC_LEAK_TEST (non-breach) and
+        must NOT create a SOVEREIGNTY_BREACH event or increment the counter.
+        """
+        # Capture the breach count before the self-test
+        health_before = requests.get(f"{BASE_URL}/health", timeout=10).json()
+        count_before = health_before.get("sentinel", {}).get("breach_count", 0)
+
+        # Trigger the self-test twice — it must be idempotent
+        requests.post(f"{BASE_URL}/test/sentinel", timeout=15)
         requests.post(f"{BASE_URL}/test/sentinel", timeout=15)
 
-        # Then check the audit log
-        resp = requests.get(f"{BASE_URL}/audit/log", timeout=10)
+        # Breach count must be unchanged by the self-test
+        health_after = requests.get(f"{BASE_URL}/health", timeout=10).json()
+        count_after = health_after.get("sentinel", {}).get("breach_count", 0)
+        assert count_after == count_before, (
+            f"Self-test mutated breach counter: {count_before} -> {count_after}"
+        )
+
+        # The most recent audit entry is the non-breach self-test event
+        resp = requests.get(f"{BASE_URL}/audit/last", timeout=10)
         assert resp.status_code == 200
-        data = resp.json()
-        entries = data.get("entries", [])
-
-        # Find a SOVEREIGNTY_BREACH entry
-        breach_entries = [
-            e for e in entries if e.get("event_type") == "SOVEREIGNTY_BREACH"
-        ]
-        assert len(breach_entries) > 0, (
-            f"Expected at least one SOVEREIGNTY_BREACH entry in audit log. "
-            f"Found {len(entries)} entries: {[e.get('event_type') for e in entries]}"
+        last_entry = resp.json().get("entry")
+        assert last_entry is not None
+        assert last_entry["event_type"] == "SYNTHETIC_LEAK_TEST", (
+            f"Expected SYNTHETIC_LEAK_TEST, got {last_entry['event_type']}"
         )
-
-        # Verify the breach entry has required fields
-        breach = breach_entries[-1]
-        assert "destination_ip" in breach.get("details", {}), (
-            f"Breach entry missing destination_ip: {breach}"
-        )
+        assert last_entry.get("details", {}).get("is_synthetic_test") is True
 
 
 # ---------- Full E2E Demo Import Test ----------

@@ -1,13 +1,14 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Shield } from 'lucide-react'
-import ChatCanvas from './components/ChatCanvas'
+import ChatCanvas, { type ChatMessage } from './components/ChatCanvas'
 import DeliverableViewer from './components/DeliverableViewer'
 import SovereigntyMonitor from './components/SovereigntyMonitor'
 import ModelStatus from './components/ModelStatus'
 import AgentTrace from './components/AgentTrace'
 import RoleSwitcher from './components/RoleSwitcher'
 import ModelSelector from './components/ModelSelector'
-import { sendChat, type ChatResponse } from './hooks/useApi'
+import SessionSidebar from './components/SessionSidebar'
+import { sendChat, fetchSession, type ChatResponse } from './hooks/useApi'
 
 export default function App() {
   const [role, setRole] = useState<'engineer' | 'manager'>('engineer')
@@ -17,25 +18,106 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [sentinelTriggered, setSentinelTriggered] = useState(false)
 
+  // Session and project persistence state
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
+    return localStorage.getItem('active_session_id') || null
+  })
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    return localStorage.getItem('active_project_id') || null
+  })
+  const [sessionMessages, setSessionMessages] = useState<ChatMessage[]>([])
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  // Rehydrate conversation from local store on mount or session switch
+  useEffect(() => {
+    if (activeSessionId) {
+      fetchSession(activeSessionId)
+        .then((detail) => {
+          if (detail && detail.messages) {
+            const msgs: ChatMessage[] = detail.messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+              model_used: m.model_used,
+              deliverables: m.deliverables,
+            }))
+            setSessionMessages(msgs)
+            const lastAssistant = [...detail.messages].reverse().find((m) => m.role === 'assistant')
+            if (lastAssistant) {
+              setChatResponse({
+                response: lastAssistant.content,
+                model_used: lastAssistant.model_used,
+                trace: lastAssistant.trace,
+                deliverables: lastAssistant.deliverables,
+                session_id: detail.id,
+              })
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn('Could not restore session:', err)
+          localStorage.removeItem('active_session_id')
+          setActiveSessionId(null)
+          setSessionMessages([])
+          setChatResponse(null)
+        })
+    } else {
+      setSessionMessages([])
+      setChatResponse(null)
+    }
+  }, [activeSessionId])
+
+  const handleSelectSession = (sid: string | null) => {
+    if (!sid) {
+      localStorage.removeItem('active_session_id')
+      setActiveSessionId(null)
+      setSessionMessages([])
+      setChatResponse(null)
+    } else {
+      localStorage.setItem('active_session_id', sid)
+      setActiveSessionId(sid)
+    }
+  }
+
+  const handleSelectProject = (pid: string | null) => {
+    if (!pid) {
+      localStorage.removeItem('active_project_id')
+      setActiveProjectId(null)
+    } else {
+      localStorage.setItem('active_project_id', pid)
+      setActiveProjectId(pid)
+    }
+  }
+
   const handleSend = useCallback(async (prompt: string) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await sendChat(prompt, role, selectedModel)
+      const targetProjectId = activeProjectId === 'standalone' ? undefined : (activeProjectId || undefined)
+      const res = await sendChat(prompt, role, selectedModel, activeSessionId || undefined, targetProjectId)
       setChatResponse(res)
+      if (res.session_id) {
+        setActiveSessionId(res.session_id)
+        localStorage.setItem('active_session_id', res.session_id)
+      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Request failed'
+      let msg = err instanceof Error ? err.message : 'Request failed'
+      if (typeof err === 'object' && err !== null) {
+        const anyErr = err as { code?: string; message?: string }
+        if (anyErr.code === 'ECONNABORTED' || (anyErr.message && anyErr.message.toLowerCase().includes('timeout'))) {
+          msg = 'Inference timed out. The local CPU model is processing a complex multi-part query. Try selecting a faster 3B model or shortening the prompt.'
+        }
+      }
       setError(msg)
     } finally {
       setLoading(false)
     }
-  }, [role, selectedModel])
+  }, [role, selectedModel, activeSessionId, activeProjectId])
 
   return (
     <div className="h-screen flex flex-col" style={{ background: 'var(--bg-base)' }}>
       {/* Top bar */}
       <header
-        className="flex items-center justify-between px-6 py-3"
+        className="relative z-50 flex items-center justify-between px-6 py-3"
         style={{
           background: 'var(--bg-surface)',
           backdropFilter: 'blur(16px)',
@@ -60,7 +142,7 @@ export default function App() {
             </h1>
             <p className="text-[10px] font-medium flex items-center gap-1.5" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
-              Air-Gapped Local Hardware Execution · Ollama 7B & 14B
+              Air-Gapped Local Hardware Execution · Linux Pop!_OS & 3B / 7B / 14B Ready
             </p>
           </div>
         </div>
@@ -77,8 +159,18 @@ export default function App() {
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left pane: Chat + Deliverables */}
-        <div className="flex-[7] flex flex-col" style={{ borderRight: '1px solid var(--border-subtle)' }}>
+        {/* Leftmost pane: Session History Sidebar */}
+        <SessionSidebar
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          activeProjectId={activeProjectId}
+          onSelectProject={handleSelectProject}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        />
+
+        {/* Center pane: Chat + Deliverables */}
+        <div className="flex-[7] flex flex-col min-w-0" style={{ borderRight: '1px solid var(--border-subtle)' }}>
           <div className="flex-1 overflow-hidden">
             <ChatCanvas
               onSend={handleSend}
@@ -86,6 +178,8 @@ export default function App() {
               loading={loading}
               error={error}
               role={role}
+              sessionId={activeSessionId}
+              initialMessages={sessionMessages}
             />
           </div>
           {chatResponse && (
@@ -93,7 +187,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Right pane: Sidebar */}
+        {/* Right pane: Sovereignty + Models + Trace Sidebar */}
         <div
           className="flex-[3] flex flex-col gap-3.5 p-4 overflow-y-auto"
           style={{

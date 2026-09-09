@@ -242,9 +242,14 @@ print(f"\n{'=' * 60}")
 print(f"RESULTS: {passed} PASS / {failed} FAIL out of {passed + failed} checks")
 print(f"{'=' * 60}")
 
-if failed:
-    print("\n⚠️  Some checks FAILED — investigate above results.")
-    sys.exit(1)
-else:
-    print("\n✅ All checks passed — $2.5 million word-format is NOT falsely excluded.")
-    sys.exit(0)
+def test_engineering_kb_filter_results():
+    assert failed == 0, f"{failed} checks failed"
+
+
+if __name__ == "__main__":
+    if failed:
+        print("\n⚠️  Some checks FAILED — investigate above results.")
+        sys.exit(1)
+    else:
+        print("\n✅ All checks passed — $2.5 million word-format is NOT falsely excluded.")
+        sys.exit(0)

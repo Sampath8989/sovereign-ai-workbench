@@ -59,6 +59,16 @@ const FALLBACK_MODELS: ModelInfo[] = [
     is_present: true,
   },
   {
+    id: 'qwen2.5-vl-7b-instruct-q3_k_m.gguf',
+    name: 'Qwen 2.5 VL 7B Instruct',
+    category: 'VISION',
+    param_size: '7B',
+    vram_gb: 3.8,
+    size_gb: 3.55,
+    description: 'Multimodal vision-language model for image reasoning, diagram analysis, and document OCR.',
+    is_present: true,
+  },
+  {
     id: 'qwen2.5-7b-instruct-q3_k_m.gguf',
     name: 'Qwen 2.5 7B Instruct',
     category: 'GENERAL',
@@ -89,13 +99,33 @@ const FALLBACK_MODELS: ModelInfo[] = [
     is_present: true,
   },
   {
+    id: 'llama-3.2-3b-instruct-q4_k_m.gguf',
+    name: 'Llama 3.2 3B Instruct',
+    category: 'GENERAL',
+    param_size: '3B',
+    vram_gb: 2.0,
+    size_gb: 1.88,
+    description: 'Meta Llama 3.2 3B instruction model, fast and lightweight for 4GB VRAM.',
+    is_present: true,
+  },
+  {
     id: 'qwen2.5-coder-3b-instruct-q4_k_m.gguf',
     name: 'Qwen 2.5 Coder 3B',
     category: 'CODE',
     param_size: '3B',
     vram_gb: 2.0,
-    size_gb: 1.30,
-    description: 'Lightweight code generator for quick script synthesis.',
+    size_gb: 1.96,
+    description: 'Lightweight code generator for quick script synthesis and deliverables.',
+    is_present: true,
+  },
+  {
+    id: 'qwen2.5-3b-instruct-q4_k_m.gguf',
+    name: 'Qwen 2.5 3B Instruct',
+    category: 'GENERAL',
+    param_size: '3B',
+    vram_gb: 2.0,
+    size_gb: 1.88,
+    description: 'High-accuracy 3B instruction model for math, reasoning, and synthesis on 4GB VRAM.',
     is_present: true,
   },
   {
@@ -199,14 +229,14 @@ export default function ModelSelector({ selectedModel, onSelectModel }: Props) {
   }
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative z-50" ref={dropdownRef}>
       {/* Dropdown Trigger Button */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all group"
+        className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all group cursor-pointer"
         style={{
           background: 'var(--bg-elevated)',
           border: isOpen ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
@@ -245,7 +275,7 @@ export default function ModelSelector({ selectedModel, onSelectModel }: Props) {
       {/* Dropdown Menu Modal / Popover */}
       {isOpen && (
         <div
-          className="absolute right-0 mt-2 w-80 rounded-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150"
+          className="absolute right-0 top-full mt-2 w-80 rounded-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150"
           style={{
             background: 'rgba(15, 20, 30, 0.96)',
             backdropFilter: 'blur(20px)',
@@ -291,7 +321,7 @@ export default function ModelSelector({ selectedModel, onSelectModel }: Props) {
                     onSelectModel(m.id)
                     setIsOpen(false)
                   }}
-                  className="w-full text-left px-3.5 py-2.5 transition-colors flex items-start justify-between gap-3 group"
+                  className="w-full text-left px-3.5 py-2.5 transition-colors flex items-start justify-between gap-3 group cursor-pointer"
                   style={{
                     background: isSelected ? 'rgba(0, 229, 160, 0.08)' : 'transparent',
                   }}
@@ -356,7 +386,7 @@ export default function ModelSelector({ selectedModel, onSelectModel }: Props) {
             }}
           >
             <span>Auto switches based on prompt</span>
-            <span style={{ color: 'var(--accent)' }}>Ollama 7B / 14B Ready</span>
+            <span style={{ color: 'var(--accent)' }}>3B / 7B / 14B Ready</span>
           </div>
         </div>
       )}

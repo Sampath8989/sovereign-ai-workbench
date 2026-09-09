@@ -16,6 +16,7 @@ import pytest
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+os.environ.setdefault("USE_MOCK_LLM", "1")
 
 
 @pytest.fixture(autouse=True, scope="function")

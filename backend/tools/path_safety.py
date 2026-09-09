@@ -4,9 +4,51 @@ Ensures all file operations stay within their intended directory boundaries.
 """
 
 from pathlib import Path
+from typing import Optional
 
 # Maximum allowed filename length (common filesystem limit)
 MAX_FILENAME_LENGTH = 200
+
+
+def resolve_existing_casefold(path: Path) -> Optional[Path]:
+    """
+    Resolve a candidate path to the REAL file on disk.
+
+    1. If the candidate exists exactly as written, it is returned unchanged.
+    2. Otherwise, if the candidate's parent directory contains exactly one
+       file whose name differs only by letter case (e.g. the model referenced
+       ``screenshot.png`` but the uploaded file is ``Screenshot.png``), the
+       real on-disk file is returned. This mirrors case-insensitive filesystems
+       without ever lowercasing or rewriting the real filename.
+    3. Ambiguous (zero or multiple) matches return ``None`` so a lookup never
+       silently picks the wrong file.
+
+    Never performs path traversal: only the candidate's own parent directory
+    is listed, and the candidate is expected to already be containment-checked.
+    """
+    candidate = Path(path)
+    try:
+        if candidate.exists():
+            return candidate
+    except OSError:
+        return None
+
+    parent = candidate.parent
+    if not parent.is_dir():
+        return None
+
+    name_lower = candidate.name.lower()
+    matches = []
+    try:
+        for child in parent.iterdir():
+            if child.is_file() and child.name.lower() == name_lower:
+                matches.append(child)
+    except OSError:
+        return None
+
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def safe_resolve_output_path(filename: str, base_dir: Path) -> Path:

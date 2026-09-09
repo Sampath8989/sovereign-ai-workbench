@@ -69,6 +69,13 @@ MODEL_METADATA_REGISTRY: Dict[str, Dict[str, Any]] = {
         "vram_gb": 4.5,
         "description": "Multimodal vision-language model for image reasoning, diagram analysis, and document OCR.",
     },
+    "qwen2.5-vl-7b-instruct-q3_k_m.gguf": {
+        "name": "Qwen 2.5 VL 7B Instruct",
+        "category": "VISION",
+        "param_size": "7B",
+        "vram_gb": 3.8,
+        "description": "Multimodal vision-language model for image reasoning, document OCR, and diagram analysis.",
+    },
     "qwen2.5-7b-instruct-q3_k_m.gguf": {
         "name": "Qwen 2.5 7B Instruct",
         "category": "GENERAL",
@@ -90,12 +97,47 @@ MODEL_METADATA_REGISTRY: Dict[str, Dict[str, Any]] = {
         "vram_gb": 2.8,
         "description": "Fast, low-latency conversational model optimized for 4GB VRAM hardware.",
     },
+    "llama-3.2-3b-instruct-q4_k_m.gguf": {
+        "name": "Llama 3.2 3B Instruct",
+        "category": "GENERAL",
+        "param_size": "3B",
+        "vram_gb": 2.0,
+        "description": "Meta Llama 3.2 3B instruction model, ultra-fast and lightweight for 4GB VRAM.",
+    },
+    "llama-3.2-3b-instruct-q5_k_m.gguf": {
+        "name": "Llama 3.2 3B Instruct (Q5_K_M)",
+        "category": "GENERAL",
+        "param_size": "3B",
+        "vram_gb": 2.3,
+        "description": "High precision Meta Llama 3.2 3B instruction model.",
+    },
     "qwen2.5-coder-3b-instruct-q4_k_m.gguf": {
         "name": "Qwen 2.5 Coder 3B",
         "category": "CODE",
         "param_size": "3B",
         "vram_gb": 2.0,
-        "description": "Lightweight code generator for quick script synthesis.",
+        "description": "Lightweight code generator for quick script synthesis and deliverable generation.",
+    },
+    "qwen2.5-coder-3b-instruct-q5_k_m.gguf": {
+        "name": "Qwen 2.5 Coder 3B (Q5_K_M)",
+        "category": "CODE",
+        "param_size": "3B",
+        "vram_gb": 2.3,
+        "description": "Higher precision 3B code generator for robust Python scripts and deliverables.",
+    },
+    "qwen2.5-3b-instruct-q4_k_m.gguf": {
+        "name": "Qwen 2.5 3B Instruct",
+        "category": "GENERAL",
+        "param_size": "3B",
+        "vram_gb": 2.0,
+        "description": "High-accuracy 3B instruction-tuned model for Q&A, math reasoning, and synthesis on 4GB VRAM.",
+    },
+    "qwen2.5-3b-instruct-q5_k_m.gguf": {
+        "name": "Qwen 2.5 3B Instruct (Q5_K_M)",
+        "category": "GENERAL",
+        "param_size": "3B",
+        "vram_gb": 2.3,
+        "description": "High-precision Q5_K_M 3B instruction-tuned model.",
     },
     "qwen2.5-0.5b-instruct-q4_k_m.gguf": {
         "name": "Qwen 2.5 0.5B",
@@ -109,25 +151,34 @@ MODEL_METADATA_REGISTRY: Dict[str, Dict[str, Any]] = {
 # Model rosters per tier: {model_name: estimated_vram_gb}
 MODEL_ROSTERS: Dict[str, Dict[str, float]] = {
     "BUILD": {
+        "llama-3.2-3b-instruct-q4_k_m.gguf": 1.5,
+        "qwen2.5-coder-3b-instruct-q4_k_m.gguf": 1.5,
+        "qwen2.5-3b-instruct-q4_k_m.gguf": 1.5,
+        "llama-3.2-3b-instruct-q5_k_m.gguf": 2.0,
+        "qwen2.5-coder-3b-instruct-q5_k_m.gguf": 2.0,
+        "qwen2.5-3b-instruct-q5_k_m.gguf": 2.0,
         "qwen1_5-4b-chat-q4_k_m.gguf": 2.8,
         "qwen2.5-coder-7b-instruct-q3_k_m.gguf": 3.0,
         "deepseek-r1-7b.gguf": 3.2,
         "qwen2.5-7b-instruct-q3_k_m.gguf": 3.0,
         "qwen2.5-7b.gguf": 3.2,
         "llava-7b.gguf": 3.2,
-        "phi4-14b.gguf": 3.6,
-        "qwen2.5-coder-3b-instruct-q4_k_m.gguf": 2.0,
-        "qwen2.5-0.5b-instruct-q4_k_m.gguf": 0.8,
+        "qwen2.5-vl-7b-instruct-q3_k_m.gguf": 3.2,
+        "phi4-14b.gguf": 9.0,
+        "qwen2.5-0.5b-instruct-q4_k_m.gguf": 0.5,
     },
     "DEMO": {
         "qwen2.5-coder-7b-instruct-q3_k_m.gguf": 4.0,
         "deepseek-r1-7b.gguf": 4.5,
         "phi4-14b.gguf": 9.0,
         "llava-7b.gguf": 4.5,
+        "qwen2.5-vl-7b-instruct-q3_k_m.gguf": 4.5,
         "qwen2.5-7b-instruct-q3_k_m.gguf": 4.0,
         "qwen2.5-7b.gguf": 4.5,
-        "qwen1_5-4b-chat-q4_k_m.gguf": 2.8,
+        "llama-3.2-3b-instruct-q4_k_m.gguf": 2.0,
         "qwen2.5-coder-3b-instruct-q4_k_m.gguf": 2.0,
+        "qwen2.5-3b-instruct-q4_k_m.gguf": 2.0,
+        "qwen1_5-4b-chat-q4_k_m.gguf": 2.8,
         "qwen2.5-0.5b-instruct-q4_k_m.gguf": 0.8,
     },
 }
@@ -236,6 +287,19 @@ def get_available_models() -> List[Dict[str, Any]]:
 
 def get_router_model() -> str:
     """Return the router model name for the current tier."""
+    prefer_3b = os.getenv("PREFER_3B_MODELS", "false").lower() in ("true", "1", "yes")
+    if prefer_3b:
+        for m in [
+            "llama-3.2-3b-instruct-q4_k_m.gguf",
+            "qwen2.5-3b-instruct-q4_k_m.gguf",
+            "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+            "llama-3.2-3b-instruct-q5_k_m.gguf",
+            "qwen2.5-coder-3b-instruct-q5_k_m.gguf",
+            "qwen2.5-3b-instruct-q5_k_m.gguf",
+        ]:
+            if _model_file_valid(m):
+                return m
+
     roster = get_model_roster()
     for model_name in roster.keys():
         if _model_file_valid(model_name):
@@ -248,13 +312,22 @@ def get_router_model() -> str:
         )
         return EMERGENCY_FALLBACK_MODEL
 
-    return "qwen1_5-4b-chat-q4_k_m.gguf"
+    return "llama-3.2-3b-instruct-q4_k_m.gguf" if _model_file_valid("llama-3.2-3b-instruct-q4_k_m.gguf") else "qwen1_5-4b-chat-q4_k_m.gguf"
 
 
 def get_coder_model() -> str:
     """Return the coder/generator model name for the current tier."""
+    prefer_3b = os.getenv("PREFER_3B_MODELS", "false").lower() in ("true", "1", "yes")
+    if prefer_3b:
+        if _model_file_valid("qwen2.5-coder-3b-instruct-q4_k_m.gguf"):
+            return "qwen2.5-coder-3b-instruct-q4_k_m.gguf"
+        if _model_file_valid("qwen2.5-coder-3b-instruct-q5_k_m.gguf"):
+            return "qwen2.5-coder-3b-instruct-q5_k_m.gguf"
+
     if _model_file_valid("qwen2.5-coder-7b-instruct-q3_k_m.gguf"):
         return "qwen2.5-coder-7b-instruct-q3_k_m.gguf"
     if _model_file_valid("qwen2.5-coder-3b-instruct-q4_k_m.gguf"):
         return "qwen2.5-coder-3b-instruct-q4_k_m.gguf"
+    if _model_file_valid("qwen2.5-coder-3b-instruct-q5_k_m.gguf"):
+        return "qwen2.5-coder-3b-instruct-q5_k_m.gguf"
     return get_router_model()

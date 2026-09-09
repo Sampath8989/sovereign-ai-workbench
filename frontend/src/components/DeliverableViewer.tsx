@@ -8,42 +8,41 @@ interface Props {
 
 interface Deliverable {
   filename: string
-  type: 'docx' | 'xlsx' | 'pptx' | 'other'
+  type: 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'other'
 }
 
 function extractDeliverables(text?: string, explicit?: string[]): Deliverable[] {
-  const seen = new Set<string>()
+  // Case-insensitive dedup: "Report.docx" and "report.docx" are the same artifact.
+  const seenLower = new Set<string>()
   const files: Deliverable[] = []
+
+  const push = (filename: string) => {
+    const lower = filename.toLowerCase()
+    if (seenLower.has(lower)) return
+    seenLower.add(lower)
+    const ext = filename.split('.').pop()?.toLowerCase() || ''
+    files.push({ filename, type: (['docx', 'xlsx', 'pptx', 'pdf'].includes(ext) ? ext : 'other') as Deliverable['type'] })
+  }
 
   // Add explicit deliverables
   if (explicit) {
     for (const fn of explicit) {
-      if (fn && !seen.has(fn)) {
-        seen.add(fn)
-        const ext = fn.split('.').pop()?.toLowerCase() || ''
-        files.push({ filename: fn, type: (['docx', 'xlsx', 'pptx'].includes(ext) ? ext : 'other') as Deliverable['type'] })
-      }
+      if (fn) push(fn)
     }
   }
 
   // Add regex matches from text
   if (text) {
     const patterns = [
-      /[\w/.-]+\.(docx|xlsx|pptx)/gi,
-      /outputs\/([\w.-]+\.(docx|xlsx|pptx))/gi,
+      /[\w/.-]+\.(docx|xlsx|pptx|pdf)/gi,
+      /outputs\/([\w.-]+\.(docx|xlsx|pptx|pdf))/gi,
     ]
     for (const pattern of patterns) {
       let match
       while ((match = pattern.exec(text)) !== null) {
         const filename = match[0].split('/').pop() || match[0]
-        if (filename.startsWith('...') || seen.has(filename)) continue
-        seen.add(filename)
-
-        const ext = filename.split('.').pop()?.toLowerCase() || ''
-        files.push({
-          filename,
-          type: (['docx', 'xlsx', 'pptx'].includes(ext) ? ext : 'other') as Deliverable['type'],
-        })
+        if (filename.startsWith('...')) continue
+        push(filename)
       }
     }
   }
@@ -51,6 +50,7 @@ function extractDeliverables(text?: string, explicit?: string[]): Deliverable[] 
 }
 
 const iconMap = {
+  pdf: <FileText className="w-4 h-4" style={{ color: '#ef4444' }} />,
   docx: <FileText className="w-4 h-4" style={{ color: '#38bdf8' }} />,
   xlsx: <FileSpreadsheet className="w-4 h-4" style={{ color: 'var(--accent)' }} />,
   pptx: <Presentation className="w-4 h-4" style={{ color: '#fb923c' }} />,
@@ -58,6 +58,7 @@ const iconMap = {
 }
 
 const labelMap: Record<string, string> = {
+  pdf: 'PDF Document',
   docx: 'Word Document',
   xlsx: 'Spreadsheet',
   pptx: 'Presentation',

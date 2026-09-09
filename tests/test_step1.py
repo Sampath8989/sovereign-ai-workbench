@@ -137,24 +137,36 @@ class TestSandbox:
 class TestSentinel:
     """Test suite for the sovereignty sentinel."""
 
-    def test_sentinel_breach_detection(self):
+    def test_sentinel_self_test_is_non_mutating(self):
         """
-        Trigger a synthetic leak and verify a SOVEREIGNTY_BREACH
-        is logged in the audit log.
+        The /test/sentinel self-check reports pass/fail and is non-mutating:
+        it must NOT increment the breach counter or log a SOVEREIGNTY_BREACH.
         """
+        # Breach count before
+        health_before = requests.get(f"{BASE_URL}/health", timeout=10).json()
+        count_before = health_before.get("sentinel", {}).get("breach_count", 0)
+
         resp = requests.post(f"{BASE_URL}/test/sentinel", timeout=15)
         assert resp.status_code == 200
         data = resp.json()
-        assert "Leak triggered" in data["status"]
+        assert data["status"] == "test_completed"
+        assert "passed" in data, f"Self-test should report pass/fail: {data}"
 
-        # Check the last audit entry is a SOVEREIGNTY_BREACH
+        # Breach count must be unchanged
+        health_after = requests.get(f"{BASE_URL}/health", timeout=10).json()
+        count_after = health_after.get("sentinel", {}).get("breach_count", 0)
+        assert count_after == count_before, (
+            f"Self-test mutated breach counter: {count_before} -> {count_after}"
+        )
+
+        # The last audit entry is the non-breach self-test event, not a breach
         last_resp = requests.get(f"{BASE_URL}/audit/last", timeout=10)
         last_entry = last_resp.json()["entry"]
         assert last_entry is not None
-        assert last_entry["event_type"] == "SOVEREIGNTY_BREACH", (
-            f"Expected SOVEREIGNTY_BREACH, got {last_entry['event_type']}"
+        assert last_entry["event_type"] == "SYNTHETIC_LEAK_TEST", (
+            f"Expected SYNTHETIC_LEAK_TEST, got {last_entry['event_type']}"
         )
-        assert "8.8.8.8" in last_entry["details"]["destination_ip"]
+        assert last_entry.get("details", {}).get("is_synthetic_test") is True
 
     def test_sentinel_returns_status(self):
         """Verify sentinel status endpoint works."""

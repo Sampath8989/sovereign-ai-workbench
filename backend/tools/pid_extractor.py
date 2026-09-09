@@ -6,6 +6,7 @@ Falls back to MockYOLO/MockVisionModel if real libraries are unavailable.
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -94,13 +95,31 @@ def extract_topology(image_path: str) -> dict:
         A dict with "nodes" and "edges" lists.
     """
     # Path containment: reject paths that escape the sandbox directory
-    from backend.tools.path_safety import safe_resolve_input_path
+    from backend.tools.path_safety import safe_resolve_input_path, resolve_existing_casefold
     _sandbox_dir = Path(__file__).resolve().parent.parent.parent / "workspace" / "sandbox_files"
     try:
         resolved = safe_resolve_input_path(image_path, _sandbox_dir)
     except ValueError as e:
         raise ValueError(f"P&ID extractor rejected path: {e}")
+
+    # Resolve to the real on-disk file when the referenced name differs only
+    # by letter case from the actual uploaded filename.
+    real_resolved = resolve_existing_casefold(resolved)
+    if real_resolved is not None:
+        resolved = real_resolved
     image_path = str(resolved)
+
+    # Explicit no-match: never run MockYOLO/MockVision (which fabricate boxes,
+    # tags, and confidence scores) against a file that does not exist.
+    if not os.path.exists(image_path) or not os.path.isfile(image_path):
+        logger.warning(f"P&ID extractor: no file found at {image_path}")
+        return {
+            "status": "no_match_found",
+            "message": f"No drawing file found at {Path(image_path).name}. "
+                       "Upload the P&ID via the attach button first.",
+            "nodes": [],
+            "edges": [],
+        }
 
     # Step 1: Run YOLO
     if _YOLO_AVAILABLE:
@@ -131,8 +150,10 @@ def extract_topology(image_path: str) -> dict:
             tag_prompt = f"Read the equipment tag number in this P&ID region. Equipment type: {eq_type}"
             tag_text = vision.analyze_image(crop_path, tag_prompt)
 
-            # Clean up tag text
-            tag = tag_text.strip() if tag_text else f"{eq_type.upper()}-{cls_id + 100}"
+            # Clean up tag text. If the vision model produced no tag, report
+            # the equipment type only — never fabricate a tag id like
+            # "VALVE-100" that does not exist in the drawing.
+            tag = tag_text.strip() if tag_text else f"{eq_type.upper()}-UNKNOWN"
 
             nodes.append({
                 "id": tag,

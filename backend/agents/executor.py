@@ -20,6 +20,30 @@ from backend.tools.photo_analyzer import analyze_nameplate
 
 logger = logging.getLogger(__name__)
 
+# Cap the text handed to an LLM summarize step. The models run with a 2048-token
+# context window, so dumping a long file (or worse, binary decoded as text) into
+# the prompt makes llama.cpp raise "Requested tokens (...) exceed context window".
+# Roughly 3000 chars fit comfortably alongside the system prompt and the reply.
+_MAX_SUMMARIZE_CONTEXT_CHARS = 3000
+
+
+def _cap_context(text: str, limit: int = _MAX_SUMMARIZE_CONTEXT_CHARS) -> str:
+    """Truncate context text to ``limit`` chars with an explicit marker."""
+    if not text or len(text) <= limit:
+        return text
+    return text[:limit] + "\n\n... [content truncated to fit the model context window]"
+
+
+# Request-scoped set of already-emitted artifact keys (tool, casefolded filename).
+# Cleared per request so one generation request produces exactly one artifact
+# per output filename. This is the isolation boundary for deliverable writes.
+_emitted_artifacts: set = set()
+
+
+def reset_artifact_tracking() -> None:
+    """Clear the request-scoped artifact tracker (call at request start)."""
+    _emitted_artifacts.clear()
+
 
 def execute_step(step: dict, context: dict, model_manager: ModelManager = None) -> str:
     """
@@ -40,6 +64,22 @@ def execute_step(step: dict, context: dict, model_manager: ModelManager = None) 
     logger.info(f"Executing step: tool={tool}, action={action}, args={args}")
 
     result = ""
+
+    # --- Single-artifact guarantee (Bug 9) ---
+    # File-generating tools (doc/ppt/sheet) must never write a second artifact
+    # for the same filename within one request. Case-variant duplicates
+    # ("Report.docx" vs "report.docx") collapse to the first writer.
+    if tool in {"doc_generator", "ppt_generator", "spreadsheet_generator"}:
+        fname = args[0] if args else ""
+        if fname:
+            key = (tool, fname.lower())
+            if key in _emitted_artifacts:
+                logger.info(
+                    f"execute_step: duplicate artifact {tool}/{fname} already "
+                    f"emitted this request; skipping duplicate write"
+                )
+                return f"Deliverable already generated: {fname}"
+            _emitted_artifacts.add(key)
 
     if tool == "file_io":
         result = _execute_file_io(action, args)
@@ -97,6 +137,11 @@ def _execute_llm(
         # If args contain text, use it. Otherwise, compile from context.
         if args and args[0]:
             text_to_summarize = args[0]
+            # If there are no prior step results in context and user did not ask to summarize,
+            # this was an unneeded fallback step; return directly to avoid wasting CPU inference
+            has_prior_results = any(k.endswith("_result") for k in context)
+            if not has_prior_results and "summar" not in text_to_summarize.lower():
+                return text_to_summarize
         else:
             # Gather results from previous steps
             text_to_summarize = " ".join(
@@ -104,13 +149,30 @@ def _execute_llm(
                 if k.endswith("_result")
             )
             if not text_to_summarize:
-                text_to_summarize = "No context available."
+                return "Ready for synthesis."
+
+        # Never send the raw (possibly multi-hundred-KB / binary-decoded) text
+        # to the model — truncate so the prompt fits the 2048-token window.
+        text_to_summarize = _cap_context(text_to_summarize)
 
         if model_manager is None:
-            model_manager = ModelManager()
+            from backend.core.model_manager import get_model_manager
+            model_manager = get_model_manager()
 
         from backend.config import get_coder_model
-        model_name = get_coder_model()
+        # Reuse resident model if available to prevent model eviction thrashing on CPU
+        model_name = None
+        if hasattr(model_manager, "resident_models") and model_manager.resident_models:
+            model_name = list(model_manager.resident_models.keys())[0]
+        if not model_name:
+            model_name = get_coder_model()
+
+        # MockLLM summarize is a pure-text path: it must never return a nested
+        # tool plan (which would leak into the pipeline as fabricated JSON).
+        from backend.core.model_manager import MockLLM
+        model = model_manager.load_model(model_name, reject_oversized=False)
+        if isinstance(model, MockLLM):
+            return model.summarize(text_to_summarize)
 
         messages = [
             {
@@ -120,7 +182,7 @@ def _execute_llm(
             {"role": "user", "content": text_to_summarize},
         ]
 
-        return model_manager.generate_from_messages(model_name, messages)
+        return model_manager.generate_from_messages(model_name, messages, max_tokens=256)
     else:
         return f"Error: Unknown LLM action '{action}'"
 
@@ -151,11 +213,12 @@ def _execute_calculator(args: list) -> str:
 
 
 def _execute_doc_generator(args: list) -> str:
-    """Execute the Word document generator tool."""
+    """Execute the document generator tool (PDF or Word)."""
     filename = args[0] if len(args) > 0 else "output.docx"
     title = args[1] if len(args) > 1 else "Untitled"
     content = args[2] if len(args) > 2 else ""
-    return generate_doc(filename, title, content)
+    output_format = args[3] if len(args) > 3 else None
+    return generate_doc(filename, title, content, output_format=output_format)
 
 
 def _execute_ppt_generator(args: list) -> str:

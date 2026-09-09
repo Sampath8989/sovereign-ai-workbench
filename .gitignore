@@ -39,9 +39,21 @@ desktop.ini
 # Workspace (sandbox files)
 workspace/sandbox_files/
 workspace/outputs/
+workspace/logs/
+workspace/*.db
+*.db
 
 # Models (large files)
 models/*.gguf
+*.aria2
+
+# Tools and cache
+.freebuff/
+
+# Downloaded demo datasets (keep manifest + download script)
+datasets/*
+!datasets/README.md
+!datasets/download_datasets.sh
 
 # Frontend
 frontend/node_modules/

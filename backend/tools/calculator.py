@@ -119,11 +119,31 @@ def _pre_filter(expr: str) -> None:
     """
     Defense-in-depth regex check. Raises ValueError if the expression
     contains patterns that suggest code injection rather than math.
+    Logs an explicit sandbox audit event to AuditLogger.
     """
-    if _BLOCKED_PATTERNS.search(expr):
+    match = _BLOCKED_PATTERNS.search(expr)
+    if match:
+        matched_pattern = match.group(0)
+        try:
+            import os
+            from backend.core.audit_log import AuditLogger
+            audit = AuditLogger()
+            audit.log_event(
+                "SANDBOX_BLOCKED_INJECTION",
+                {
+                    "tool": "calculator",
+                    "expression": expr[:200],
+                    "matched_pattern": matched_pattern,
+                    "pid": os.getpid(),
+                    "policy": "disallow_code_execution",
+                },
+            )
+        except Exception as log_err:
+            logger.warning(f"Failed to log sandbox audit event: {log_err}")
+
         raise ValueError(
-            f"Rejected: expression contains disallowed pattern. "
-            f"Only mathematical expressions are accepted."
+            f"[SECURITY_BLOCK] Code execution or system access attempts via the calculator "
+            f"tool are strictly prohibited by sandbox policy (matched pattern '{matched_pattern}')."
         )
 
 
@@ -147,8 +167,8 @@ def _with_timeout(func, *args, timeout: int = _SOLVE_TIMEOUT_SECONDS):
     Uses threading.Event on Windows (signal.alarm not available).
     Returns (result, None) on success, (None, error_msg) on timeout/error.
     """
-    if _IS_WINDOWS:
-        # Windows: use threading-based timeout (signal.SIGALRM not available)
+    if _IS_WINDOWS or threading.current_thread() is not threading.main_thread():
+        # Use threading-based timeout (signal.SIGALRM only works in main thread)
         result_container = [None]
         exception_container = [None]
         done_event = threading.Event()
@@ -173,7 +193,7 @@ def _with_timeout(func, *args, timeout: int = _SOLVE_TIMEOUT_SECONDS):
             return None, f"Error solving expression: {exception_container[0]}"
         return result_container[0], None
     else:
-        # Linux/macOS: use signal.alarm (main thread only)
+        # Linux/macOS main thread: use signal.alarm
         def _handler(signum, frame):
             raise TimeoutError("Expression too complex to solve within time limit.")
 
@@ -230,6 +250,9 @@ def solve_expression(expression: str) -> str:
     except ValueError as e:
         # Pre-filter rejection or parse error
         logger.warning(f"Calculator rejected input: {e}")
+        err_msg = str(e)
+        if "[SECURITY_BLOCK]" in err_msg:
+            return err_msg
         return f"Error: {e}"
     except Exception as e:
         logger.error(f"Calculator error: {e}")

@@ -2,7 +2,9 @@
 
 A production-ready, air-gapped AI workbench with sovereignty enforcement, hybrid RAG, multi-step agent orchestration, and deliverable synthesis tools.
 
-> **Fully Windows compatible** — runs on Windows 10/11 with Python 3.10+, Node.js 18+, and optional NVIDIA GPU.
+> **Linux (Pop!_OS / Ubuntu) & Windows compatible** — runs natively on Pop!_OS 22.04 / 24.04 LTS, Ubuntu, Debian, Linux, and Windows 10/11 with Python 3.10+, Node.js 18+, and optional NVIDIA GPU.
+>
+> **3B Models Optimized for 4GB VRAM** — high-performance local inference tailored for laptops & desktops with 4GB GPUs (RTX 2050, 3050, GTX 1650).
 
 ---
 
@@ -12,7 +14,9 @@ A production-ready, air-gapped AI workbench with sovereignty enforcement, hybrid
 - [Architecture Overview](#architecture-overview)
 - [How It Works](#how-it-works)
 - [Prerequisites](#prerequisites)
-- [Installation (Windows)](#installation-windows)
+- [Quick Start (Linux / Pop!_OS)](#quick-start-linux--pop_os)
+- [Quick Start (Windows)](#quick-start-windows)
+- [3B Models Roster & Setup](#3b-models-roster--setup)
 - [Running the Workbench](#running-the-workbench)
 - [Frontend UI](#frontend-ui)
 - [API Endpoints](#api-endpoints)
@@ -84,7 +88,37 @@ For **greetings and simple chat**, the pipeline short-circuits directly to a con
 
 ---
 
-## Installation (Windows)
+## Quick Start (Linux / Pop!_OS)
+
+### 1. Prerequisites on Pop!_OS / Ubuntu / Debian
+
+Pop!_OS 22.04 or 24.04 LTS comes with modern kernel and NVIDIA drivers. To install core build packages:
+
+```bash
+sudo apt update && sudo apt install -y python3 python3-venv python3-pip build-essential cmake git curl nodejs npm
+```
+
+### 2. Run the Linux Setup Script
+
+Run the automated one-click installer:
+
+```bash
+chmod +x setup_linux.sh start_linux.sh
+./setup_linux.sh
+```
+
+This automated script will:
+1. Detect Pop!_OS / Linux distribution, CPU, RAM, and NVIDIA GPU (VRAM detection via `nvidia-smi`)
+2. Verify all system prerequisites
+3. Create the Python virtual environment (`venv/`)
+4. Install all Python backend dependencies with GPU-accelerated `llama-cpp-python`
+5. Install all frontend React dependencies (`npm install`)
+6. Automatically generate `.env` configured for 4GB VRAM and 3B models
+7. Import or download 3B models and launch the workbench via `./start_linux.sh`
+
+---
+
+## Quick Start (Windows)
 
 ### Step 1: Clone the Repository
 
@@ -101,29 +135,51 @@ Double-click **`setup_windows.bat`** or run in Command Prompt / PowerShell:
 setup_windows.bat
 ```
 
-This will:
-1. Verify Python and Node.js are installed
-2. Create a Python virtual environment (`venv/`)
-3. Install all Python backend dependencies (`requirements.txt`)
-4. Install all frontend dependencies (`frontend/package.json`)
+---
 
-### Step 3: (Optional) Place GGUF Model Files
+## 3B Models Roster & Setup
 
-Download GGUF models and place them in the `models/` directory:
+Sovereign AI Workbench features **first-class support for 3B parameter models**, specifically engineered to run at **maximum speed within 4GB VRAM** (e.g., NVIDIA GeForce RTX 2050, 3050, GTX 1650). 3B models fit 100% in VRAM with full CUDA GPU offload and zero memory swapping.
 
+### Available 3B Model Variants
+
+| Model Variant | Filename | Size | VRAM | Role |
+|---------------|----------|------|------|------|
+| **Llama 3.2 3B Instruct (Q4_K_M)** | `llama-3.2-3b-instruct-q4_k_m.gguf` | 1.88 GB | ~2.0 GB | General chat, reasoning, multi-domain queries |
+| **Qwen 2.5 Coder 3B (Q4_K_M)** | `qwen2.5-coder-3b-instruct-q4_k_m.gguf` | 1.96 GB | ~2.0 GB | Python scripts, debugging, docx/pptx/xlsx synthesis |
+| **Qwen 2.5 3B Instruct (Q4_K_M)** | `qwen2.5-3b-instruct-q4_k_m.gguf` | 1.88 GB | ~2.0 GB | Math, logic, step-by-step verification, synthesis |
+| **Qwen 2.5 Coder 3B (Q5_K_M)** | `qwen2.5-coder-3b-instruct-q5_k_m.gguf` | 2.30 GB | ~2.3 GB | High-precision coding and deliverable generation |
+| **Qwen 2.5 3B Instruct (Q5_K_M)** | `qwen2.5-3b-instruct-q5_k_m.gguf` | 2.30 GB | ~2.3 GB | High-precision general reasoning |
+| **Llama 3.2 3B Instruct (Q5_K_M)** | `llama-3.2-3b-instruct-q5_k_m.gguf` | 2.30 GB | ~2.3 GB | High-precision Meta Llama 3.2 3B |
+| **Qwen 2.5 0.5B Instruct** | `qwen2.5-0.5b-instruct-q4_k_m.gguf` | 0.46 GB | ~0.8 GB | Ultra-low memory emergency fallback |
+
+### Downloading / Installing 3B Models
+
+Use the built-in model downloader script (with automatic local Ollama cache import):
+
+```bash
+# Download the 3B core suite (Llama 3.2 3B + Qwen 2.5 Coder 3B + Fallback 0.5B):
+python scripts/download_models.py --model recommended
+
+# Download all 3B variants (Q4_K_M and Q5_K_M):
+python scripts/download_models.py --model all-3b
+
+# Download a specific model:
+python scripts/download_models.py --model llama-3b-q4
+python scripts/download_models.py --model coder-3b-q4
+python scripts/download_models.py --model general-3b-q4
 ```
-models/
-├── qwen2.5-coder-7b-instruct-q3_k_m.gguf    (Code tasks)
-├── deepseek-r1-7b.gguf                        (Reasoning/math)
-├── phi4-14b.gguf                              (Deep synthesis)
-├── llava-7b.gguf                              (Vision/OCR)
-├── qwen2.5-7b-instruct-q3_k_m.gguf           (General chat)
-└── ... (see config.py for full roster)
+
+> **Local Ollama Integration**: If you already have models in Ollama (e.g., `ollama pull llama3.2:3b` or `qwen2.5-coder:3b`), the downloader automatically detects and imports them directly into `models/` in seconds without re-downloading!
+
+### Configuring 3B Preference
+
+In `.env`:
+```env
+# Enable 3B model prioritization for 4GB VRAM GPUs:
+PREFER_3B_MODELS=true
+HARDWARE_TIER=BUILD
 ```
-
-> **Without model files**, the system runs in MockLLM mode — all features work with deterministic test responses.
-
-### Step 4: (Optional) Configure Environment
 
 Create or edit `.env` in the project root:
 
@@ -149,26 +205,43 @@ USE_MOCK_EMBEDDER=1
 
 ## Running the Workbench
 
-### Option A: Use the Batch Script (Recommended)
+### Option A: Linux / Pop!_OS Launcher (Recommended)
+
+Run the launch script from terminal:
+
+```bash
+./start_linux.sh
+```
+
+This will:
+- Check virtual environment and port availability
+- Start the FastAPI backend on `http://localhost:8000`
+- Start the React frontend on `http://localhost:5173`
+- Automatically open `http://localhost:5173` in your default browser
+- Gracefully shut down both backend and frontend on `Ctrl+C`
+
+### Option B: Windows Batch Script
 
 Double-click **`start_windows.bat`** — this opens two separate terminal windows:
 - **Backend** on `http://localhost:8000`
 - **Frontend** on `http://localhost:5173`
 
-### Option B: Manual Start
-
-Open **two separate** Command Prompt / PowerShell windows:
+### Option C: Manual Start (Linux & Windows)
 
 **Terminal 1 — Backend:**
-```cmd
-cd sovereign-ai-workbench
+```bash
+# On Linux / Pop!_OS:
+source venv/bin/activate
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+# On Windows:
 venv\Scripts\activate
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **Terminal 2 — Frontend:**
-```cmd
-cd sovereign-ai-workbench\frontend
+```bash
+cd frontend
 npm run dev
 ```
 

@@ -40,14 +40,38 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
   }
 
   const mm = health.resident_models
-  const models = mm.resident_models
-  const usedGB = mm.total_vram_used_gb
-  const totalGB = mm.effective_budget_gb
+  const models = mm.resident_models || {}
+  const liveUsedGB = mm.live_used_vram_gb !== null && mm.live_used_vram_gb !== undefined ? mm.live_used_vram_gb : mm.total_vram_used_gb
+  const liveTotalGB = mm.live_total_vram_gb !== null && mm.live_total_vram_gb !== undefined ? mm.live_total_vram_gb : mm.effective_budget_gb
+  const effectiveBudgetGB = mm.effective_budget_gb
   const freeGB = mm.live_free_vram_gb
   const modelsList = Object.entries(models)
   const hasModels = modelsList.length > 0
-  const vramPercent = totalGB > 0 ? (usedGB / totalGB) * 100 : 0
+  const vramPercent = liveTotalGB > 0 ? (liveUsedGB / liveTotalGB) * 100 : 0
   const availableCount = health.available_models ? health.available_models.length : 10
+
+  // Check VRAM requirements against tier budget
+  const roster = health.model_roster || {}
+  const selectedReqVram = selectedModel !== 'auto' ? (roster[selectedModel] || 0) : 0
+  const exceedsVram = selectedModel !== 'auto' && selectedReqVram > effectiveBudgetGB
+  const isResident = selectedModel !== 'auto' && Boolean(models[selectedModel])
+  const isPinned = selectedModel !== 'auto' && (mm.pinned_model === selectedModel || models[selectedModel]?.pinned)
+
+  const getStatusBadge = () => {
+    if (selectedModel === 'auto') {
+      return { label: 'Dynamic', color: 'var(--text-secondary)' }
+    }
+    if (exceedsVram) {
+      return { label: `⚠️ Exceeds VRAM (${selectedReqVram}GB > ${effectiveBudgetGB.toFixed(1)}GB)`, color: '#f87171' }
+    }
+    if (isPinned) {
+      return { label: 'Pinned (Resident)', color: '#4ade80' }
+    }
+    if (isResident) {
+      return { label: 'Loaded (LRU)', color: '#38bdf8' }
+    }
+    return { label: 'Routing Preference (On-Demand)', color: 'var(--text-muted)' }
+  }
 
   const getSelectedLabel = () => {
     if (selectedModel === 'auto') return '⚡ Auto (Intelligent Routing)'
@@ -63,6 +87,8 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
     if (clean.includes('0.5b')) return 'Qwen 2.5 0.5B'
     return clean
   }
+
+  const badge = getStatusBadge()
 
   return (
     <div className="card">
@@ -94,20 +120,27 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
 
       {/* Selected Active Engine Mode */}
       <div
-        className="mb-3 px-2.5 py-1.5 rounded-lg flex items-center justify-between text-[11px]"
+        className="mb-3 px-2.5 py-1.5 rounded-lg flex flex-col gap-1 text-[11px]"
         style={{
-          background: selectedModel === 'auto' ? 'rgba(0, 229, 160, 0.08)' : 'rgba(168, 85, 247, 0.08)',
-          border: selectedModel === 'auto' ? '1px solid rgba(0, 229, 160, 0.2)' : '1px solid rgba(168, 85, 247, 0.2)',
+          background: exceedsVram ? 'rgba(239, 68, 68, 0.08)' : (selectedModel === 'auto' ? 'rgba(0, 229, 160, 0.08)' : 'rgba(168, 85, 247, 0.08)'),
+          border: exceedsVram ? '1px solid rgba(239, 68, 68, 0.25)' : (selectedModel === 'auto' ? '1px solid rgba(0, 229, 160, 0.2)' : '1px solid rgba(168, 85, 247, 0.2)'),
           fontFamily: 'var(--font-mono)',
         }}
       >
-        <span className="flex items-center gap-1.5" style={{ color: selectedModel === 'auto' ? 'var(--accent)' : '#c084fc' }}>
-          {selectedModel === 'auto' ? <Sparkles className="w-3.5 h-3.5" /> : <Cpu className="w-3.5 h-3.5" />}
-          <span className="font-semibold">{getSelectedLabel()}</span>
-        </span>
-        <span className="text-[10px] opacity-75" style={{ color: 'var(--text-secondary)' }}>
-          {selectedModel === 'auto' ? 'Dynamic' : 'Pinned'}
-        </span>
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5" style={{ color: exceedsVram ? '#f87171' : (selectedModel === 'auto' ? 'var(--accent)' : '#c084fc') }}>
+            {selectedModel === 'auto' ? <Sparkles className="w-3.5 h-3.5" /> : <Cpu className="w-3.5 h-3.5" />}
+            <span className="font-semibold">{getSelectedLabel()}</span>
+          </span>
+          <span className="text-[10px]" style={{ color: badge.color }}>
+            {badge.label}
+          </span>
+        </div>
+        {exceedsVram && (
+          <p className="text-[10px] text-red-400 font-mono mt-0.5">
+            ⚠️ Model requires {selectedReqVram} GB VRAM, exceeding the {effectiveBudgetGB.toFixed(1)} GB tier budget.
+          </p>
+        )}
       </div>
 
       {/* VRAM bar */}
@@ -115,10 +148,10 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
         <div className="flex items-center justify-between mb-1.5">
           <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
             <HardDrive className="w-3 h-3" />
-            VRAM
+            Live VRAM
           </span>
           <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-            {usedGB.toFixed(1)} / {totalGB.toFixed(1)} GB
+            {liveUsedGB.toFixed(1)} / {liveTotalGB.toFixed(1)} GB
           </span>
         </div>
         <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-elevated)' }}>
@@ -130,11 +163,12 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
             }}
           />
         </div>
-        {freeGB !== null && (
-          <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            Free: {freeGB.toFixed(1)} GB
-          </p>
-        )}
+        <div className="flex items-center justify-between text-[10px] mt-1" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+          {freeGB !== null && (
+            <span>Free: {freeGB.toFixed(1)} GB</span>
+          )}
+          <span>Budget: {effectiveBudgetGB.toFixed(1)} GB</span>
+        </div>
       </div>
 
       {/* Resident models */}
@@ -154,6 +188,11 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
                 {name.replace(/\.gguf$/, '').split('-').slice(0, 3).join('-')}
               </span>
               <span className="flex items-center gap-1">
+                {info.pinned && (
+                  <span className="text-[9px] px-1 py-0.5 rounded font-mono bg-green-950/40 text-green-400 border border-green-500/30">
+                    PINNED
+                  </span>
+                )}
                 <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
                   background: info.type === 'Llama' ? 'var(--accent-muted)' : 'var(--bg-hover)',
                   color: info.type === 'Llama' ? 'var(--accent)' : 'var(--text-muted)',
@@ -162,7 +201,7 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
                   {info.type}
                 </span>
                 <span className="text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                  {info.vram_gb}GB
+                  {info.vram_gb.toFixed(1)}GB
                 </span>
               </span>
             </div>
@@ -174,7 +213,7 @@ export default function ModelStatus({ selectedModel = 'auto' }: Props) {
           style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}
         >
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--border-default)' }} />
-          No models loaded
+          No models currently resident in VRAM
         </div>
       )}
     </div>

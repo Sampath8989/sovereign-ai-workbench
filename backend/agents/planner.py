@@ -46,7 +46,8 @@ def generate_plan(prompt: str, model_manager: ModelManager = None) -> List[dict]
         A list of dicts, each with keys: tool, action, args.
     """
     if model_manager is None:
-        model_manager = ModelManager()
+        from backend.core.model_manager import get_model_manager
+        model_manager = get_model_manager()
 
     messages = [
         {"role": "system", "content": PLAN_SYSTEM_PROMPT},
@@ -62,20 +63,18 @@ def generate_plan(prompt: str, model_manager: ModelManager = None) -> List[dict]
         response = output["choices"][0]["text"]
         logger.info(f"Planner raw response: {response[:200]}")
 
-        # Check if MockLLM returned a direct response (greeting/simple chat)
-        # instead of a JSON plan. Direct responses start with [MockLLM] prefix
-        # and don't contain JSON structure.
+        # Check if MockLLM returned a direct response (greeting/simple chat or
+        # a deterministic rejection/guidance) instead of a JSON plan. Direct
+        # responses start with [MockLLM] prefix and don't contain JSON structure.
         if response.startswith("[MockLLM] "):
             direct_text = response[len("[MockLLM] "):]
-            # If it doesn't look like JSON, it's a direct conversational response.
-            # Wrap it as a plan with a special marker so the graph can detect it.
+            # If it doesn't look like JSON, it's a direct conversational response
+            # (greeting, small talk, or deterministic guidance like the bare-
+            # filename upload rejection). Wrap it as a direct-response plan so
+            # the graph uses it verbatim instead of re-running the pipeline.
             if not direct_text.strip().startswith('{') and not direct_text.strip().startswith('['):
-                if mock_llm._is_greeting(prompt):
-                    logger.info("Planner: MockLLM returned direct response for greeting")
-                    return [{"tool": "llm", "action": "summarize", "args": [direct_text], "direct_response": True}]
-                else:
-                    logger.info("Planner: MockLLM returned direct string for non-greeting; using fallback plan")
-                    return _make_fallback(prompt)
+                logger.info("Planner: MockLLM returned direct conversational response")
+                return [{"tool": "llm", "action": "summarize", "args": [direct_text], "direct_response": True}]
 
         # Parse JSON from the response
         # Strip markdown code fences if present
